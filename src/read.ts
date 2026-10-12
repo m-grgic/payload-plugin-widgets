@@ -1,6 +1,6 @@
-import type { CollectionSlug, FlattenedField, Where } from 'payload'
+import type { Access, CollectionSlug, FlattenedField, Where } from 'payload'
 import { dateProblems, figureProblems, measureProblems, Misconfigured, nameProblems, noSource, Unavailable, isDate, whereProblems, type Problem } from './check'
-import { sourceCalled } from './options'
+import { accessTo, readable, sourceCalled } from './options'
 import { after } from './time'
 import { months, timed as atMoments } from './when'
 import { added, amountOf, CALLED, calcOf, combined, currencyOf, fetched, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
@@ -23,10 +23,14 @@ export interface Pick {
   to?: string
   /** Only what belongs to one of something, as the source's `scopes` call it: `{ project: 12 }`. */
   scope?: Record<string, number | string>
+  /** Who it is for, on top of who its source is for: asked as Payload asks a collection, a filter leaving only some of the records. */
+  access?: Access
 }
+/** Read with the server's access in place of the person's own: only what gives no records away, a figure and a chart. */
+interface Elevated { overrideAccess?: boolean }
 /** One of the source's measures by name, or one said in place: `{ avg: 'total' }`. */
 type Measured = string | Reckoned
-export interface FigurePick extends Pick {
+export interface FigurePick extends Pick, Elevated {
   measure?: Measured
   /** Also read for the period before this one, which is as long and ends where this one starts. */
   compare?: 'previous'
@@ -42,10 +46,11 @@ export interface FigurePick extends Pick {
   as?: string
 }
 export interface ListPick extends Pick { list?: string; limit?: number }
-export interface ChartPick extends Pick { measure?: Measured; by?: string }
+export interface ChartPick extends Pick, Elevated { measure?: Measured; by?: string }
 
 export interface Bar { label: string; amount: number; shown: string; href?: string }
-export interface ChartReading { note: string; href: string; bars: Bar[]; empty: string }
+/** `href` is the list behind it: there for whoever the collection lets read. */
+export interface ChartReading { note: string; href?: string; bars: Bar[]; empty: string }
 
 export { Misconfigured, Unavailable }
 
@@ -73,12 +78,23 @@ const span = (context: Context, pick: Pick): { start: string | null; end: string
 
 const named = (context: Context, source: AnySource | string): AnySource | undefined => (typeof source === 'string' ? sourceCalled(context.sources, source) : source)
 
-const from = async (context: Context, pick: Pick): Promise<AnySource> => {
-  if (!context.as.user) throw new Unavailable('Nobody is signed in')
-  const found = named(context, pick.source)
-  if (!found) throw new Misconfigured([noSource(String(pick.source), context.sources)])
-  if (!await context.mayRead(found)) throw new Unavailable('Not part of the role')
-  return found
+/**
+ * The source a widget reads, for whoever asks: with what their access narrows it by, the context to read it with
+ * (the server's access where the widget asks for that) and whether the list behind it is theirs to open.
+ */
+const from = async (asked: Context, pick: Pick & Elevated, kind: 'figure' | 'list' | 'chart') => {
+  if (!asked.as.user) throw new Unavailable('Nobody is signed in')
+  const source = named(asked, pick.source)
+  if (!source) throw new Misconfigured([noSource(String(pick.source), asked.sources)])
+  // rows would lead to records nobody could open
+  const elevated = !!pick.overrideAccess && kind !== 'list'
+  const narrowed = await accessTo(asked.req, source, { access: pick.access, overrideAccess: elevated })
+  if (!narrowed) throw new Unavailable('Not for whoever is asking')
+  return {
+    source, narrowed,
+    context: elevated ? { ...asked, as: { ...asked.as, overrideAccess: true } } : asked,
+    linked: !elevated || await readable(asked.req, source),
+  }
 }
 
 /** The date a widget goes by: the one it picked, as long as it reads like a field, or the source's own. */
@@ -121,8 +137,11 @@ const measureOf = (context: Context, source: AnySource, picked: Measured | undef
   return reckoned(called(labelled(field.label, name)), amountOf(name, picked.format ?? hint.format ?? 'number', how, picked.currency ?? hint.currency))
 }
 
-/** The records a widget is about: its filter, its period and where it stands. `fixed` is a filter the measure or list insists on. */
-const chosen = (context: Context, source: AnySource, pick: Pick, fixed?: string) => {
+/**
+ * The records a widget is about: its filter, its period and where it stands. `fixed` is a filter the measure or list
+ * insists on, `left` what the access of whoever asks leaves of them.
+ */
+const chosen = (context: Context, source: AnySource, pick: Pick, fixed?: string, left: Where[] = []) => {
   const name = fixed ?? pick.filter
   const filter = name ? source.filters[name] : undefined
   if (name && !filter) throw new Misconfigured([{ text: '{source} has no filter called "{name}"', vars: { source: source.slug, name } }])
@@ -135,6 +154,7 @@ const chosen = (context: Context, source: AnySource, pick: Pick, fixed?: string)
     : Array.isArray((narrowed as Selection).alternatives) ? new Selection((narrowed as Selection).alternatives) : plain(narrowed as Where)
   // what the widget itself is narrowed by
   if (pick.where) selection = selection.within(plain(pick.where))
+  for (const where of left) selection = selection.within(selected(where))
 
   for (const [kind, id] of Object.entries(pick.scope ?? {})) {
     if (id === undefined || id === null) continue
@@ -182,17 +202,19 @@ const changed = (context: Context, now: number, then: number) => {
   return `${share > 0 ? '+' : share < 0 ? '−' : ''}${context.number(Math.abs(share))}%`
 }
 
-export const readFigure = async (context: Context, pick: FigurePick): Promise<Reading & More & { tone: Tone; href: string }> => {
-  const source = await from(context, pick)
+export const readFigure = async (asked: Context, pick: FigurePick): Promise<Reading & More & { tone: Tone }> => {
+  const { source, narrowed, context, linked } = await from(asked, pick, 'figure')
   sound(context, source, pick, 'figure')
   const measure = measureOf(context, source, pick.measure)
   if (!measure) throw new Misconfigured([{ text: '{source} has no measure called "{name}"', vars: { source: source.slug, name: String(pick.measure ?? 'count') } }])
-  const { selection, filter } = chosen(context, source, pick, measure.filter)
+  const { selection, filter } = chosen(context, source, pick, measure.filter, narrowed)
 
   const reading = await measure.read(context, selection, source)
   // a plain count says what its filter finds worth saying
   const remark = measure.counts && filter?.remark ? await filter.remark(context, Number(reading.value), selection, source) : {}
-  const plain = { tone: 'calm' as const, href: context.list(source.slug, selection.filter), ...reading, ...remark }
+  const plain: Reading & { tone: Tone } = { tone: 'calm', href: context.list(source.slug, selection.filter), ...reading, ...remark }
+  // the list behind it is the collection's own: not for whoever only this figure is for
+  if (!linked) delete plain.href
   const goal = Number(pick.goal) > 0 ? Number(pick.goal) : undefined
   const drawn = pick.as === 'sparkline'
   if (!pick.compare && !goal && !drawn && !pick.note) return plain
@@ -210,7 +232,7 @@ export const readFigure = async (context: Context, pick: FigurePick): Promise<Re
 
   const earlier = pick.compare ? before(context, pick) : undefined
   if (earlier && now !== undefined) {
-    const then = await measure.read(context, chosen(context, source, { ...pick, period: 'custom', ...earlier }, measure.filter).selection, source)
+    const then = await measure.read(context, chosen(context, source, { ...pick, period: 'custom', ...earlier }, measure.filter, narrowed).selection, source)
     const amount = then.amount ?? 0
     more.previous = { value: then.value, amount }
     more.trend = now > amount ? 'up' : now < amount ? 'down' : 'flat'
@@ -225,18 +247,18 @@ export const readFigure = async (context: Context, pick: FigurePick): Promise<Re
     vars.left = written(Math.max(0, goal - now))
     usual.push(context.t('{percent} of {goal}', vars))
   }
-  if (drawn) more.series = (await readChart(context, { ...pick, by: 'time' })).bars
+  if (drawn) more.series = (await readChart(asked, { ...pick, by: 'time' })).bars
 
   const note = pick.note ? context.t(pick.note, vars) : usual.length ? usual.join(' · ') : plain.note
   return { ...plain, ...more, ...(note ? { note } : {}) }
 }
 
-export const readList = async (context: Context, pick: ListPick): Promise<ListReading & { href: string }> => {
-  const source = await from(context, pick)
+export const readList = async (asked: Context, pick: ListPick): Promise<ListReading & { href: string }> => {
+  const { source, narrowed, context } = await from(asked, pick, 'list')
   sound(context, source, pick, 'list')
   const list = source.lists?.[pick.list ?? Object.keys(source.lists ?? {})[0]]
   if (!list) throw new Misconfigured([{ text: '{source} has no list to show', vars: { source: source.slug } }])
-  const { selection } = chosen(context, source, pick, list.filter)
+  const { selection } = chosen(context, source, pick, list.filter, narrowed)
   const limit = Math.max(1, Math.min(20, Number(pick.limit) || 6))
   return { href: context.list(source.slug, selection.filter), ...await list.read(context, selection, source, limit) }
 }
@@ -273,8 +295,8 @@ const called = async (context: Context, source: AnySource, field: string, keys: 
 
 const MOST = 8
 
-export const readChart = async (context: Context, pick: ChartPick): Promise<ChartReading> => {
-  const source = await from(context, pick)
+export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartReading> => {
+  const { source, narrowed, context, linked } = await from(asked, pick, 'chart')
   sound(context, source, pick, 'chart')
   const measure = measureOf(context, source, pick.measure)
   const amount = measure?.amount as Amount<Record<string, unknown>> | undefined
@@ -291,7 +313,7 @@ export const readChart = async (context: Context, pick: ChartPick): Promise<Char
     if (pick.period === 'upcoming') timed = { ...pick, period: 'custom', from: context.today, to: after(context.today, 180) }
     else if (!start) timed = { ...pick, period: 'custom', from: `${after(`${last.slice(0, 7)}-01`, -340).slice(0, 7)}-01`, to: end ?? undefined }
   }
-  const { selection } = chosen(context, source, timed, measure.filter)
+  const { selection } = chosen(context, source, timed, measure.filter, narrowed)
 
   const docs = await fetched<Record<string, unknown>>(context, source, selection, [...new Set([...amount.select, by ?? date])])
   // money is drawn in one currency; what is in another is said, not added
@@ -305,7 +327,7 @@ export const readChart = async (context: Context, pick: ChartPick): Promise<Char
     // more than can be read at once: said, so the chart is not taken for all of them
     docs.length >= MANY ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
   ].filter(Boolean).join(' · ')
-  const href = context.list(source.slug, selection.filter)
+  const href = linked ? context.list(source.slug, selection.filter) : undefined
   const empty = context.t('Nothing to show yet')
 
   if (!by) {
@@ -356,7 +378,7 @@ export const readChart = async (context: Context, pick: ChartPick): Promise<Char
         label: key ? names.get(key) ?? `#${key}` : context.t('None'),
         amount: value,
         shown: show(value),
-        href: context.list(source.slug, (key ? selection.and({ [by]: { equals: key } }) : selection.and({ [by]: { exists: false } })).filter),
+        ...(linked ? { href: context.list(source.slug, (key ? selection.and({ [by]: { equals: key } }) : selection.and({ [by]: { exists: false } })).filter) } : {}),
       })),
       ...(rest ? [{ label: context.t('Other'), amount: rest, shown: show(rest) }] : []),
     ],

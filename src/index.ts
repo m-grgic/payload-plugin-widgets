@@ -1,7 +1,7 @@
 import type { CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
-import { dateProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, viewProblems, whereProblems, type Problem } from './check'
+import { dateProblems, elevatedProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, viewProblems, whereProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
-import { KEY, mayUse, settled, sourceCalled, type Options, type Settings } from './options'
+import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
 
 // Dashboard widgets that read from the collections. Without anything declared, every collection is a source as its
 // fields describe it: how many, a sum for each number, a group for each select and relationship, the latest. Anybody
@@ -24,7 +24,7 @@ import { KEY, mayUse, settled, sourceCalled, type Options, type Settings } from 
 // from it, and the names it picks are checked against what the source declares:
 //
 //   const invoices = source('invoices', {
-//     label: 'Invoices', roles: ['admin'], date: 'issuedAt',
+//     label: 'Invoices', access: ({ req }) => req.user?.role === 'admin', date: 'issuedAt',
 //     filters: { unpaid: { where: { paid: { equals: false } } }, overdue: { where: { dueDate: { less_than: 'today' } } } },
 //     measures: { total: { sum: 'total', format: 'money' }, average: { avg: 'total', format: 'money' } },
 //     groups: { client: 'Client' },
@@ -44,12 +44,14 @@ import { KEY, mayUse, settled, sourceCalled, type Options, type Settings } from 
 // `widget` puts a component of your own among the ready-made ones. A figure can be set against the period before
 // (`compare: 'previous'`) and against a goal (`goal: 5000`), and says of them what its `note` asks. A chart is bars, columns or a line (`as: 'columns'`),
 // and any of the three kinds can be drawn by a component of your own, given under `views` and asked for the same way. Everything is read with the access of whoever
-// is looking. Nothing here may import a component: this is read by the Payload config.
+// is looking; `access` on a source or a widget says who else it is not for, as Payload asks it of a collection, and a
+// figure or a chart that is to say more than its reader may open says so with `overrideAccess`.
+// Nothing here may import a component: this is read by the Payload config.
 // The tiles bring their own styles and follow the admin's theme; ./widgets.css lists the variables, the classes
 // and the attributes a project restyles them by.
 
 export { chart, figure, list, widget } from './options'
-export type { Action, Options, Widget as ReadyWidget } from './options'
+export type { Action, Home, Options, Widget as ReadyWidget } from './options'
 export type { CollectionHint, FieldHint } from './discover'
 export type { Moment } from './when'
 export { PLURALS, STRINGS, type Dictionary, type Plurals, type WidgetString } from './strings'
@@ -59,12 +61,12 @@ export type { Bar, ChartReading } from './read'
 export * from './types'
 
 /**
- * The dashboard somebody starts with, and what "Reset layout" goes back to: the ready-made widgets they have a use
- * for, figures first. Everybody can then rearrange their own.
+ * The dashboard somebody starts with, and what "Reset layout" goes back to: the ready-made widgets that are for
+ * them, figures first. Everybody can then rearrange their own.
  */
 const layoutFor = async (settings: Settings, req: PayloadRequest): Promise<WidgetInstance[]> => {
   const mine = (await Promise.all(settings.widgets.map(async widget =>
-    ((widget.home ? settings.allowed(widget.home, req.user) : await mayUse(settings, req, widget)) ? [widget] : [])))).flat()
+    (await startsWith(settings, req, widget) ? [widget] : [])))).flat()
   const small = (widget: Settings['widgets'][number]) => (widget.kind === 'own' ? widget.size === 'tile' : widget.kind === 'figure')
   const wide = mine.filter(widget => !small(widget))
   return [
@@ -84,6 +86,7 @@ const misnamed = (settings: Settings): [string, Problem][] => settings.widgets.f
   const source = typeof widget.source === 'string' ? sourceCalled(settings.sources, widget.source) : widget.source
   if (!source) return [[widget.slug, noSource(String(widget.source), settings.sources)]]
   return [
+    ...elevatedProblems(widget.kind, widget, source),
     ...nameProblems(source, widget.show, widget.kind), ...viewProblems(widget.kind, widget.show.as, settings.views),
     ...(widget.kind === 'figure' ? figureProblems(widget.show) : []),
   ].map(problem => [widget.slug, problem])

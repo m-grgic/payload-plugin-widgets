@@ -12,7 +12,8 @@ a drawer, a project puts some there ready-made, and the same three can stand on 
   filtered with the admin's own filter builder.
 - **Or by the config.** `figure(…)`, `list(…)` and `chart(…)` put widgets there ready-made. They are typed against
   your generated types and checked as the config is built, with a "did you mean" where a name is off.
-- **With whoever's access.** Every read is made as the signed-in user, so access control always applies.
+- **With whoever's access.** Every read is made as the signed-in user, so access control always applies; `access`
+  functions, written as Payload's own are, say who else a widget is not for.
 - **No script draws anything.** The tiles are server components and plain CSS that follow the admin's theme, light
   and dark. No chart library is shipped to the browser.
 - **Yours to take apart.** Views of your own, the data without the tiles, widgets that are all your own, and a
@@ -234,8 +235,9 @@ Over time, a chart is drawn by day up to two months and by month beyond. Each ba
 | `period` | see below | Which records by date. Figures and charts. |
 | `date` | field name | The date the period goes by; the source's own where it is left out. |
 | `from`, `to` | `'YYYY-MM-DD'` | The first and the last day of `period: 'custom'`. Either may be left out. |
-| `roles` | `string[]` | Who the widget is for. Whoever its source is for where it is left out. |
-| `home` | `string[]` | Who *starts with it* on their dashboard, where that is fewer than `roles`. `[]` is nobody: it is then only there to be added. |
+| `access` | `Access` | [Who the widget is for](#who-sees-what), as Payload asks it of a collection: `({ req }) => boolean \| Where`. Whoever its source is for where it is left out. |
+| `overrideAccess` | `boolean` | Figures and charts: [read with the server's access](#a-total-of-what-somebody-may-not-open) in place of the person's own. Needs an `access`. |
+| `home` | `boolean \| Access` | Who *starts with it* on their dashboard, where that is fewer than it is for. `false` is nobody: it is then only there to be added. |
 | `action` | `{ label, href }` | A link of your own in the head of the tile. |
 | `after` | component path | Something of your own drawn under what the widget shows (`'src/components/Hint.tsx#Hint'`). It is handed `req`, `widgetSlug` and `widgetData`. |
 
@@ -332,7 +334,7 @@ Under `custom.widgets`, a collection or a field says what it is to the widgets:
 ```ts
 {
   slug: 'orders',
-  custom: { widgets: { label: 'Orders', date: 'placedAt', roles: ['admin'] } },
+  custom: { widgets: { label: 'Orders', date: 'placedAt', access: ({ req }) => req.user?.role === 'admin' } },
   fields: [
     { name: 'total', type: 'number', custom: { widgets: { format: 'money', currency: 'currency' } } },
     { name: 'estimate', type: 'number', custom: { widgets: { format: 'hours' } } },
@@ -346,7 +348,7 @@ Under `custom.widgets`, a collection or a field says what it is to the widgets:
 | `false` | not a source at all (`sources: { slug: true }` in the options brings it back) |
 | `label` | what it is called, where that is not the collection's own label |
 | `date` | the date its periods go by |
-| `roles` | who has a use for it, where that is fewer than may read it |
+| `access` | [who it is for](#who-sees-what), where that is fewer than may read it |
 
 | On a field | |
 | --- | --- |
@@ -364,7 +366,7 @@ import { chart, figure, source, widgetsPlugin } from 'payload-plugin-widgets'
 
 const invoices = source('invoices', {
   label: 'Invoices',
-  roles: ['admin'],
+  access: ({ req }) => req.user?.role === 'admin',
   date: 'issuedAt',
   filters: {
     unpaid: { where: { paid: { equals: false } } },
@@ -391,7 +393,7 @@ widgetsPlugin({
 | | |
 | --- | --- |
 | `label` | The collection's own where it is left out. |
-| `roles` | Who has a use for it. Whoever the collection lets read it where it is left out. |
+| `access` | [Who it is for](#who-sees-what), as Payload asks it of a collection. Whoever the collection lets read it where it is left out. |
 | `date` | The date a period and a chart over time go by. |
 | `discover` | `false` to have only what is declared here. Otherwise what the plugin finds is there too. |
 | `draft` | The collection keeps drafts: read the latest version of each. |
@@ -544,12 +546,12 @@ with what is wrong as `problems`.
 
 ### A widget that is all your own
 
-Any server component, given a place in the starting layout, a label in every language and its roles like the rest:
+Any server component, given a place in the starting layout, a label in every language and its `access` like the rest:
 
 ```ts
 import { widget } from 'payload-plugin-widgets'
 
-widget('shortcuts', { label: 'Shortcuts', Component: 'src/components/Shortcuts.tsx#Shortcuts', roles: ['admin'], size: 'wide' })
+widget('shortcuts', { label: 'Shortcuts', Component: 'src/components/Shortcuts.tsx#Shortcuts', access: ({ req }) => req.user?.role === 'admin', size: 'wide' })
 ```
 
 ```tsx
@@ -560,7 +562,7 @@ export const Shortcuts = gated(async ({ req, widgetData }) => (
 ))
 ```
 
-`gated` keeps it to its roles. `size` is `'tile'` (as small as a figure) or `'wide'`; `fields` and `data` give it
+`gated` keeps it to whoever its `access` says it is for. `size` is `'tile'` (as small as a figure) or `'wide'`; `fields` and `data` give it
 settings of its own, read from `widgetData`.
 
 The tiles themselves are exported too, to draw your own data the way the plugin draws its own: `Tile`, `ListTile`,
@@ -571,16 +573,61 @@ The tiles themselves are exported too, to draw your own data the way the plugin 
 Every read is made as the signed-in user (`overrideAccess: false`), so **Payload's access control always
 applies**: a figure counts only what that person may read.
 
-On top of it, `roles` on a source or a widget says who has a *use* for it: who is offered it, and who starts with
-it. The plugin expects a `roles` field on the user holding some of them. Where yours is kept another way, say how:
+On top of it, `access` on a source or a widget says who it is *for*: who is offered it, and who starts with it. It
+is Payload's own `Access`, written and typed like the one on a collection, and handed `{ req }`:
 
 ```ts
-widgetsPlugin({ allowed: (roles, user) => roles.includes(user?.role) })
+import type { Access } from 'payload'
+
+const admins: Access = ({ req }) => req.user?.role === 'admin'
+const theirOwn: Access = ({ req }) => ({ owner: { equals: req.user?.id } })
+
+source('invoices', { access: admins })                               // nobody else is offered it
+figure('my-orders', 'orders', { label: 'My orders', access: theirOwn }) // everybody's is their own
+<Figure req={req} source="orders" measure="total" access={admins} />
+await readFigure(req, 'orders', { measure: 'total', access: admins })
 ```
 
-- A source without roles is for whoever the collection lets read it.
-- A widget without roles is for whoever its source is for.
-- A widget somebody may not see says "Not part of your role" in place of its figure, or nothing where it is `quiet`.
+- `true` is everybody the collection lets read, `false` nobody. A `Where` in place of `true` leaves the widget only
+  those records, and the list it leads to shows the same ones.
+- A source without one is for whoever the collection lets read it. A widget without one is for whoever its source
+  is for; one with its own is asked both.
+- It only ever narrows. What the collection refuses, no `access` here brings back.
+- A widget somebody may not see says "Not available to this account" in place of its figure, or nothing where it
+  is `quiet`.
+- `home` is asked the same way, for who starts with a widget: `home: admins`, or `home: false` for nobody.
+
+In the drawer a source is offered to whoever its `access` lets in. One that answers with a promise is offered to
+everybody and refused when it is read, as the field that offers it cannot wait.
+
+### A total of what somebody may not open
+
+A figure or a chart can say more than its reader may read: revenue for a team that cannot open the invoices. As
+in the local API, that is `overrideAccess`, and as there, who then sees it is yours to say:
+
+```ts
+figure('revenue', 'invoices', {
+  label: 'Revenue this month', measure: 'total', period: 'month',
+  overrideAccess: true,
+  access: ({ req }) => ['admin', 'sales'].includes(req.user?.role),
+})
+
+<Chart req={req} source="invoices" measure="total" by="time" overrideAccess access={staff} />
+await readFigure(req, 'invoices', { measure: 'total', overrideAccess: true, access: staff })
+```
+
+- The collection's own access is not asked, and every read behind it is made with the server's access: a custom
+  measure's too, which finds `overrideAccess: true` in `context.as`.
+- It has to come with an `access`, on the widget or on its source: a ready-made widget without one stops the
+  config from being built. Somebody still has to be signed in.
+- A filter returned by that `access` still narrows what is counted.
+- The tile leads to the list behind it only for those the collection lets read. For everybody else it is not a
+  link, and neither are the bars of a chart.
+- Only figures and charts take it, and only where a developer writes them: not a list, whose rows are records,
+  and nothing set up in the drawer.
+
+What it shows is still data. A chart by client names the clients, and a figure filtered narrowly enough is one
+record's number.
 
 ## Languages, time and numbers
 
@@ -672,7 +719,6 @@ widgetsPlugin({
   discover,      // false: only the declared sources
   widgets,       // figure(…), list(…), chart(…), widget(…)
   views,         // { [name]: { kind: 'figure' | 'list' | 'chart', label, Component } }
-  allowed,       // (roles, user) => boolean
   i18n,          // { translations, plurals, translate, plural, locale }
   timeZone,      // 'UTC'
   weekStartsOn,  // 1
@@ -700,8 +746,9 @@ What a filter's function, a measure's `read` and a list's `row` are handed:
 | | |
 | --- | --- |
 | `payload` | |
-| `as` | `{ depth: 0, overrideAccess: false, user }`: spread it into a read to make it as the signed-in user |
-| `sources`, `mayRead(source)` | every source by name, and whether the person looking has a use for one |
+| `req` | the request it is all read for |
+| `as` | `{ depth: 0, overrideAccess: false, user }`: spread it into a read to make it as the signed-in user, or with the server's access where the widget asked for [`overrideAccess`](#a-total-of-what-somebody-may-not-open) |
+| `sources`, `mayRead(source)` | every source by name, and whether one is for the person looking |
 | `today`, `dayStart`, `monthStart`, `yearStart` | today as `YYYY-MM-DD`, and the instants those start at, in the time zone given |
 | `date(instant)`, `instant(day)` | the day an instant falls on there, and the instant a day starts at |
 | `currency`, `weekStartsOn` | as the options have them |
@@ -730,8 +777,8 @@ What a filter's function, a measure's `read` and a list's `row` are handed:
 | The same in the log when Payload starts, and in a tile | A field in a `where`, a `date` or a measure is not in the collection. |
 | `… was added to the config after the widgets were set up, and is no source` | A plugin that adds a collection runs after this one. Give it an `order` below 100, or list this plugin last. |
 | A widget is missing, or its component is not found | The import map is old: `payload generate:importmap`. |
-| "Not part of your role" | The widget's or its source's `roles` do not include any of the user's. See [`allowed`](#who-sees-what) where roles are kept another way. |
-| "Not available to this account" | The collection's own access control refuses the read. |
+| "Not available to this account" | The collection's own access control refuses the read, or the widget's or its source's [`access`](#who-sees-what) does. |
+| `What is read with overrideAccess has to say who it is for` when the config is built | A ready-made figure or chart has `overrideAccess` and neither it nor its source an `access`. |
 | "Only the first 5,000 are counted" | See [Limits](#limits). |
 | A figure is one day off around midnight | Set `timeZone`: a day starts in UTC where it is left out. |
 | Hours are sixty times too many | A field with `format: 'hours'` is expected to hold minutes. |

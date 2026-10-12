@@ -1,7 +1,7 @@
-import type { CollectionSlug, Config, Field, Payload, PayloadRequest, Where } from 'payload'
+import type { Access, CollectionSlug, Config, Field, Payload, PayloadRequest, Where } from 'payload'
 import { sourcesOf } from './discover'
 import type { Dictionary, Plurals } from './strings'
-import type { AnySource, Doc, Format, Label, Narrowing, Numbers, Period, Reckoned, Role, Source, Vars, View, Viewer, VIEWS } from './types'
+import type { AnySource, Doc, Format, Label, Narrowing, Numbers, Period, Reckoned, Source, Vars, View, VIEWS } from './types'
 
 // What the plugin is given by the project that uses it: the sources, the widgets made of them, and how things are
 // said. Everything has a default: without any of it, every collection is a source as its fields describe it.
@@ -13,10 +13,25 @@ type Loose = any
 interface Common {
   /** In English; `translate` in the options says it in the other languages. */
   label: string
-  /** Who has a use for it: whoever its source is for where it is left out. */
-  roles?: Role[]
-  /** Who starts with it on their dashboard, where that is fewer than `roles`: `[]` for nobody, it is then only there to be added. */
-  home?: Role[]
+  /**
+   * Who it is for, asked as Payload asks it of a collection: `({ req }) => req.user?.role === 'admin'`. A filter in
+   * place of `true` leaves it only those records. Whoever its source is for where it is left out.
+   */
+  access?: Access
+  /** Who starts with it on their dashboard, where that is fewer than it is for: `false` for nobody, it is then only there to be added. */
+  home?: Home
+}
+
+/** Whether somebody starts with a widget on their dashboard: asked as an access is, and anything but a no is a yes. */
+export type Home = boolean | Access
+
+interface Elevated {
+  /**
+   * Read with the server's access in place of the person's own, as the local API has it: a total for people who may
+   * not open what it is a total of. It has to say who it is for (`access`, here or on its source), and leads to the
+   * list behind it only for those the collection lets read.
+   */
+  overrideAccess?: boolean
 }
 
 /** A link in the head of a tile. */
@@ -55,7 +70,8 @@ interface Narrowed<S extends CollectionSlug, F extends string> {
 interface Kept {
   slug: string
   label: string
-  home?: string[]
+  access?: Access
+  home?: Home
   data?: Record<string, unknown>
   fields?: Field[]
 }
@@ -65,8 +81,7 @@ export interface SourceWidget extends Kept, Slots {
   kind: 'figure' | 'list' | 'chart'
   /** The source itself, or the collection of one that was found by the plugin. */
   source: AnySource | string
-  /** Whoever its source is for where there are none. */
-  roles?: string[]
+  overrideAccess?: boolean
   show: { filter?: string; where?: Where; period?: Period; date?: string; from?: string; to?: string; measure?: string | Reckoned; list?: string; limit?: number; by?: string; as?: string; compare?: 'previous'; goal?: number; note?: string }
 }
 
@@ -75,22 +90,20 @@ export interface OwnWidget extends Kept {
   kind: 'own'
   Component: string
   size: 'tile' | 'wide'
-  /** Anybody signed in where there are none. */
-  roles?: string[]
 }
 
 /** A ready-made widget as the plugin keeps it. */
 export type Widget = SourceWidget | OwnWidget
 
-const made = (kind: SourceWidget['kind'], slug: string, source: AnySource | string, { label, roles, home, data, fields, action, after, ...show }: Common & Loose): Widget => ({
+const made = (kind: SourceWidget['kind'], slug: string, source: AnySource | string, { label, access, overrideAccess, home, data, fields, action, after, ...show }: Common & Loose): Widget => ({
   slug, label, kind, source, show,
-  ...(roles ? { roles } : {}), ...(home ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
+  ...(access ? { access } : {}), ...(overrideAccess ? { overrideAccess: true } : {}), ...(home !== undefined ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
   ...(action ? { action } : {}), ...(after ? { after } : {}),
 })
 
 type Fields<S extends CollectionSlug> = keyof Doc<S> & string
 
-type FigureShow<S extends CollectionSlug, F extends string, M extends string> = Common & Slots & Narrowed<S, F> & {
+type FigureShow<S extends CollectionSlug, F extends string, M extends string> = Common & Slots & Elevated & Narrowed<S, F> & {
   /**
    * How many there are where it is left out. One of the source's measures by name, or one said in place: a number
    * of the collection, or a measure that adds one up, as `sum`, `avg`, `min` or `max` (`{ avg: 'total' }`).
@@ -134,7 +147,7 @@ export const list: {
   <const S extends CollectionSlug>(slug: string, source: S, show: ListShow<S, never, 'latest'>): Widget
 } = (slug: string, source: AnySource | string, show: Loose) => made('list', slug, source, show)
 
-type ChartShow<S extends CollectionSlug, F extends string, M extends string, G extends string> = Common & Slots & Narrowed<S, F> & { measure?: M | Reckoned<M | Numbers<S>>; by?: G | 'time'; /** Bars one to a row, columns side by side, or a line: `'columns'`. */ as?: As<'chart'> }
+type ChartShow<S extends CollectionSlug, F extends string, M extends string, G extends string> = Common & Slots & Elevated & Narrowed<S, F> & { measure?: M | Reckoned<M | Numbers<S>>; by?: G | 'time'; /** Bars one to a row, columns side by side, or a line: `'columns'`. */ as?: As<'chart'> }
 
 /** A measure over time, or split by one of the source's groups, as bars unless `as` says otherwise; of a collection by its slug, by any of its selects, checkboxes and relationships. */
 export const chart: {
@@ -145,13 +158,11 @@ export const chart: {
 /**
  * A widget that is all your own: any server component, as Payload takes them. Here it is given a place in the
  * starting layout and a label in every language of the admin like the rest; wrapped in `gated` (see ./components),
- * it is also kept to its roles.
+ * it is also kept to whoever its `access` says it is for.
  *
  *   widget('shortcuts', { label: 'Shortcuts', Component: 'src/components/Shortcuts.tsx#Shortcuts' })
  */
-export const widget = (slug: string, { label, roles, home, Component, size = 'wide', fields, data }: Omit<Common, 'roles'> & {
-  /** Who has a use for it: anybody signed in where it is left out. */
-  roles?: Role[]
+export const widget = (slug: string, { label, access, home, Component, size = 'wide', fields, data }: Common & {
   Component: string
   /** As small as a figure, or as wide as a list. */
   size?: 'tile' | 'wide'
@@ -160,7 +171,7 @@ export const widget = (slug: string, { label, roles, home, Component, size = 'wi
   data?: Record<string, unknown>
 }): Widget => ({
   slug, label, kind: 'own', Component, size,
-  ...(roles ? { roles } : {}), ...(home ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
+  ...(access ? { access } : {}), ...(home !== undefined ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
 })
 
 export interface Options {
@@ -181,11 +192,6 @@ export interface Options {
    *   views: { donut: { kind: 'chart', label: 'A donut', Component: 'src/components/Donut.tsx#Donut' } }
    */
   views?: Record<string, View>
-  /**
-   * Whether somebody has a use for what is marked with these roles. Where it is left out, the user is expected
-   * to have a `roles` field with some of them in it.
-   */
-  allowed?: (roles: string[], user: Viewer | null | undefined) => boolean
   /** Only where the admin speaks more than English. */
   i18n?: {
     /** Everything is written in English: this is what it is in the admin's other languages, by language (see `STRINGS`). */
@@ -226,7 +232,6 @@ export interface Settings {
   sources: Record<string, AnySource>
   widgets: Widget[]
   views: Record<string, View>
-  allowed: NonNullable<Options['allowed']>
   words: (req: PayloadRequest) => Words
   /** What a widget, a field or a choice is called in each of the admin's languages. */
   label: (english: Label) => Label
@@ -252,10 +257,6 @@ export const settled = (options: Options, config: Config): Settings => {
     sources: sourcesOf(options.sources, config, options.discover !== false),
     widgets: options.widgets ?? [],
     views: options.views ?? {},
-    allowed: options.allowed ?? ((roles, user) => {
-      const mine = (user as { roles?: unknown } | null | undefined)?.roles
-      return Array.isArray(mine) && roles.some(role => mine.includes(role))
-    }),
     words: req => {
       const language = req.i18n?.language || 'en'
       return {
@@ -294,23 +295,58 @@ export const settingsOf = (payload: Payload): Settings => {
 export const sourceCalled = (sources: Record<string, AnySource>, name: string): AnySource | undefined =>
   sources[name] ?? Object.values(sources).find(source => source.slug === name)
 
-/** Whether a source is for whoever makes the request: by the roles it was given, or else by what its collection lets them read. */
-export const mayRead = async (settings: Settings, req: PayloadRequest, source: AnySource): Promise<boolean> => {
-  if (!req.user) return false
-  if (source.roles) return settings.allowed(source.roles, req.user)
+/** Whether the collection of a source lets whoever makes the request read it at all. */
+export const readable = async (req: PayloadRequest, source: AnySource): Promise<boolean> => {
   const read = req.payload.collections[source.slug as CollectionSlug]?.config.access.read
   try {
-    return !!read && !!(await read({ req }))
+    return !!req.user && !!read && !!(await read({ req }))
   } catch {
     return false
   }
 }
 
-/** Whether a ready-made widget is: by its own roles, or else by its source. One of the project's own without roles is anybody's. */
+/** What a widget adds to who its source is for. */
+export interface Gate { access?: Access; overrideAccess?: boolean }
+
+/**
+ * What somebody is let see of a source: nothing, or its records, narrowed by whatever filters stood in place of a
+ * yes. The collection is asked first, unless it is read with the server's access; then the source, then the widget.
+ */
+export const accessTo = async (req: PayloadRequest, source: AnySource, gate: Gate = {}): Promise<Where[] | false> => {
+  if (!req.user) return false
+  try {
+    if (!gate.overrideAccess && !await readable(req, source)) return false
+    const narrowed: Where[] = []
+    for (const access of [source.access, gate.access]) {
+      const answer = access ? await access({ req }) : true
+      if (!answer) return false
+      if (typeof answer === 'object') narrowed.push(answer)
+    }
+    return narrowed
+  } catch {
+    return false
+  }
+}
+
+/** Whether a source is for whoever makes the request. */
+export const mayRead = async (req: PayloadRequest, source: AnySource): Promise<boolean> => !!await accessTo(req, source)
+
+/** Whether a ready-made widget is: by its own access and its source's. One of the project's own without any is anybody's. */
 export const mayUse = async (settings: Settings, req: PayloadRequest, widget: Widget): Promise<boolean> => {
   if (!req.user) return false
-  if (widget.roles) return settings.allowed(widget.roles, req.user)
-  if (widget.kind === 'own') return true
+  if (widget.kind === 'own') {
+    try {
+      return !widget.access || !!await widget.access({ req })
+    } catch {
+      return false
+    }
+  }
   const source = typeof widget.source === 'string' ? sourceCalled(settings.sources, widget.source) : widget.source
-  return !!source && mayRead(settings, req, source)
+  return !!source && !!await accessTo(req, source, widget)
+}
+
+/** Whether somebody starts with a ready-made widget on their dashboard: it is for them, and it does not say otherwise. */
+export const startsWith = async (settings: Settings, req: PayloadRequest, widget: Widget): Promise<boolean> => {
+  if (widget.home === false || !await mayUse(settings, req, widget)) return false
+  return typeof widget.home === 'function' ? !!await widget.home({ req }) : true
 }

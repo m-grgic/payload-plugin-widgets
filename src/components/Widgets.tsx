@@ -72,16 +72,16 @@ export const ReadyWidget = async ({ req, widgetData, widgetSlug }: WidgetServerP
   const widget = settings.widgets.find(candidate => candidate.slug === widgetSlug)
   if (!widget) return null
   const { t } = settings.words(req)
-  if (!await mayUse(settings, req, widget)) return <Notice label={t(widget.label)} name={widget.slug} note={t('Not part of your role')} />
+  if (!await mayUse(settings, req, widget)) return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} />
   // one of the project's own is drawn by its own component, not by this one
   if (widget.kind === 'own') return null
-  const { source, label, show, action } = widget
+  const { source, label, show, action, access, overrideAccess } = widget
   // what the project draws under it: found in the import map by its path
   const after = widget.after
     ? RenderServerComponent({ Component: widget.after, importMap: req.payload.importMap, serverProps: { req, widgetSlug, widgetData: widgetData ?? {} } })
     : undefined
   // what it picks was checked where it was defined
-  const own = { req, label, name: widget.slug, source, action, after, ...show } as { req: typeof req; source: string }
+  const own = { req, label, name: widget.slug, source, action, after, access, ...(overrideAccess ? { overrideAccess } : {}), ...show } as { req: typeof req; source: string }
   if (widget.kind === 'list') return <Records {...own} />
   if (widget.kind === 'chart') return <Chart {...own} />
   return <Figure {...own} data={widgetData ?? {}} />

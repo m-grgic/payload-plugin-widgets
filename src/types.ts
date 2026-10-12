@@ -1,4 +1,4 @@
-import type { CollectionSlug, DataFromCollectionSlug, Payload, PayloadRequest, Where, WhereField } from 'payload'
+import type { Access, CollectionSlug, DataFromCollectionSlug, Payload, PayloadRequest, Where, WhereField } from 'payload'
 
 // What a collection offers to the widgets: the sets of its records worth looking at (filters), what can be told about
 // a set (measures: a count, a sum, or a figure worked out by a function), short lists, and what it can be split by.
@@ -31,9 +31,14 @@ export type Vars = Record<string, number | string>
 export type Label = string | Record<string, string>
 export type Viewer = NonNullable<PayloadRequest['user']>
 
-type RolesOf<U> = U extends { roles?: infer R } ? (NonNullable<R> extends readonly (infer One)[] ? One : never) : never
-/** The roles a user can have, as the project's generated types know them; any text where users have no `roles`. */
-export type Role = [RolesOf<Viewer>] extends [never] ? string : Extract<RolesOf<Viewer>, string>
+/**
+ * Who something is for, asked the way Payload asks it of a collection, with the same functions: nobody (`false`),
+ * everybody (`true`), or only some of the records, as a filter.
+ *
+ *   access: ({ req }) => req.user?.role === 'admin'
+ *   access: ({ req }) => ({ owner: { equals: req.user?.id } })
+ */
+export type { Access }
 
 export const PERIODS = [
   { label: 'Any time', value: 'all' },
@@ -52,11 +57,13 @@ export type Period = (typeof PERIODS)[number]['value']
 
 export interface Context {
   payload: Payload
-  /** Options for a read made as the signed-in user. */
-  as: { depth: 0; overrideAccess: false; user: Viewer }
-  /** Every source the widgets were given, by name, and whether the person looking has a use for one. */
+  /** The request of whoever is looking. */
+  req: PayloadRequest
+  /** Options for a read made as the signed-in user; with the server's access where the widget asks for that (`overrideAccess`). */
+  as: { depth: 0; overrideAccess: boolean; user: Viewer }
+  /** Every source the widgets were given, by name, and whether one is for the person looking. */
   sources: Record<string, AnySource>
-  /** Asked of the roles a source was given, or else of what the collection lets them read. */
+  /** Asked of what the collection lets them read, and of the source's own `access` where it has one. */
   mayRead: (source: AnySource) => Promise<boolean>
   /** Today in the time zone the widgets were given, as YYYY-MM-DD. */
   today: string
@@ -281,10 +288,10 @@ export interface Source<
   /** The collection's own where it is left out. */
   label?: Label
   /**
-   * Who has a use for it: what `allowed` in the plugin's options is asked about. Where it is left out, it is for
-   * whoever the collection lets read it.
+   * Who it is for, on top of what the collection lets them read: asked as Payload asks a collection, so the same
+   * functions serve. A filter in place of `true` leaves its widgets only those records.
    */
-  roles?: Role[]
+  access?: Access
   /** Left as it is declared: nothing the plugin finds in the collection by itself is added to it. */
   discover?: boolean
   /** The collection keeps drafts: the admin lists the latest version of each, and so do the widgets. */
@@ -313,7 +320,7 @@ export type AnySource = Source<Loose, Loose, Loose, Loose, Loose, Loose>
  * lists are handed; the names of what is declared are checked wherever a widget picks from it.
  *
  *   export const tasks = source('tasks', {
- *     label: 'Tasks', roles: ['admin'], date: 'dueDate',
+ *     label: 'Tasks', access: ({ req }) => req.user?.role === 'admin', date: 'dueDate',
  *     filters: { open: { where: { status: { not_equals: 'done' } } }, late: { label: 'Overdue', where: { dueDate: { less_than: 'today' } } } },
  *     measures: { estimated: { sum: 'estimatedTime', format: 'hours' } },
  *     groups: { status: 'Status' },
@@ -327,8 +334,8 @@ export const source = <
 >(slug: S, definition: {
   /** The collection's own where it is left out. */
   label?: Label
-  /** Who has a use for it; whoever the collection lets read it where it is left out. */
-  roles?: Role[]
+  /** Who it is for, on top of what the collection lets them read; a filter leaves its widgets only those records. */
+  access?: Access
   /**
    * `false` to have only what is declared here. Otherwise what the plugin finds in the collection by itself is
    * there too: a sum for each number field, a group for each select and relationship, a list of the latest.

@@ -47,7 +47,8 @@ export interface ListContent {
 }
 
 export interface ChartContent {
-  label: string; note: string; href: string; empty: string
+  /** `href` is the list behind it: without it the head is not a link. */
+  label: string; note: string; href?: string; empty: string
   bars: { label: string; amount: number; shown: string; href?: string }[]
 }
 
@@ -183,13 +184,16 @@ const Line = ({ bars, peak, label, spark }: { bars: Bars; peak: number; label: s
 /** A measure over time or by group: bars one to a row unless it is asked for as columns or as a line. */
 export const ChartTile = ({ label, note, href, bars, empty, action, after, name, as = 'bars' }: ChartContent & Slots & { as?: 'bars' | 'columns' | 'line' }) => {
   const peak = Math.max(...bars.map(bar => Math.abs(bar.amount)), 0)
+  const head = (
+    <>
+      <span className="widgets-tile__label">{label}</span>
+      <span className="widgets-tile__note">{note}</span>
+    </>
+  )
   return (
     <section className="widgets-tile widgets-tile--plain" {...marks('chart', 'calm', name, as)}>
       <div className="widgets-tile__head">
-        <Link href={href}>
-          <span className="widgets-tile__label">{label}</span>
-          <span className="widgets-tile__note">{note}</span>
-        </Link>
+        {href ? <Link href={href}>{head}</Link> : <div>{head}</div>}
         <Extra action={action} />
       </div>
       {!bars.length || !peak ? <span className="widgets-tile__note">{empty}</span>

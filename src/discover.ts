@@ -1,5 +1,5 @@
-import type { CollectionConfig, CollectionSlug, Config, Field, Where } from 'payload'
-import { count, labelled, reckoned, rows, sum, type AnySource, type Format, type Label, type Measure, type Role } from './types'
+import type { Access, CollectionConfig, CollectionSlug, Config, Field, Where } from 'payload'
+import { count, labelled, reckoned, rows, sum, type AnySource, type Format, type Label, type Measure } from './types'
 
 // What a collection offers to the widgets without anybody declaring it, read out of its fields: how many there are,
 // a sum for each number, a group for each select, checkbox and relationship, every date a period can go by, how to
@@ -27,7 +27,7 @@ export type FieldHint = false | { format?: Format; currency?: string }
  *
  * What the plugin is given under `sources` comes first: `true` there brings back a collection that says `false`.
  */
-export type CollectionHint = false | { label?: Label; date?: string; roles?: Role[] }
+export type CollectionHint = false | { label?: Label; date?: string; access?: Access }
 
 // so the editor offers both where a field or a collection is written
 declare module 'payload' {
@@ -89,7 +89,7 @@ export const discovered = (collection: CollectionConfig): AnySource => {
   return {
     slug: collection.slug as CollectionSlug,
     label: says.label ?? labelled(collection.labels?.plural, collection.slug),
-    ...(says.roles ? { roles: says.roles } : {}),
+    ...(says.access ? { access: says.access } : {}),
     ...(collection.versions && typeof collection.versions === 'object' && collection.versions.drafts ? { draft: true } : {}),
     ...(date ? { date } : {}),
     dates,
@@ -123,7 +123,7 @@ const merged = (declared: AnySource, found: AnySource): AnySource => {
   return {
     ...declared,
     label: declared.label ?? found.label,
-    ...(declared.roles ?? found.roles ? { roles: declared.roles ?? found.roles } : {}),
+    ...(declared.access ?? found.access ? { access: declared.access ?? found.access } : {}),
     ...(declared.draft ?? found.draft ? { draft: true } : {}),
     date: declared.date ?? found.date,
     dates: { ...found.dates, ...declared.dates },

@@ -25,9 +25,10 @@ export const contextFor = (req: PayloadRequest, data: Record<string, unknown> = 
   const money = (amount: number, currency: string) => settings.format(amount, 'money', locale, currency.toUpperCase())
   return {
     payload,
+    req,
     as: { depth: 0, overrideAccess: false, user },
     sources: settings.sources,
-    mayRead: source => mayRead(settings, req, source),
+    mayRead: source => mayRead(req, source),
     today,
     dayStart: startOf(zone, today),
     monthStart: startOf(zone, `${today.slice(0, 7)}-01`),

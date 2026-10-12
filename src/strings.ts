@@ -33,7 +33,7 @@ export const STRINGS = [
   '{count} in all', '{count} in another currency left out', 'Only the first {count} are counted',
   '{change} on the period before', 'Nothing in the period before', '{percent} of {goal}', 'by {what}', 'Yes', 'No', 'None', 'Other',
   // what cannot be shown
-  'Not part of your role', 'Not available to this account', 'This could not be read',
+  'Not available to this account', 'This could not be read',
   // what is set up wrong
   'There is no source called "{name}"',
   '{source} has no filter called "{name}"',
@@ -50,6 +50,8 @@ export const STRINGS = [
   '{field} has no choice called "{name}": it is one of {choices}',
   '"{name}" of {source} is not a date',
   'A {kind} cannot be drawn as "{name}"',
+  'A list is read as whoever looks at it: only a figure or a chart takes overrideAccess',
+  'What is read with overrideAccess has to say who it is for: give it or its source an access',
   'Progress is towards a goal: give it one',
   'There is nothing before this to compare it with: give it a period that has a beginning',
   '"{name}" of {source} gives no number to compare or to set against a goal',

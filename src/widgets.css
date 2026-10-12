@@ -151,7 +151,8 @@
     color: inherit;
     text-decoration: none;
   }
-  .widgets-tile__head > a:first-child {
+  .widgets-tile__head > a:first-child,
+  .widgets-tile__head > div:first-child {
     display: flex;
     flex: 1;
     align-items: baseline;

@@ -1,4 +1,4 @@
-import type { Field, Option, Widget } from 'payload'
+import type { Field, Option, PayloadRequest, Widget } from 'payload'
 import type { Settings } from './options'
 import { PERIODS, VIEWS, worded, type AnySource, type Kind, type Label, type Measure } from './types'
 
@@ -16,7 +16,7 @@ const TILE = { minWidth: 'x-small', maxWidth: 'medium' } as const
 const LIST = { minWidth: 'small', maxWidth: 'full' } as const
 export const sized = (kind: 'figure' | 'list' | 'chart') => (kind === 'figure' ? TILE : LIST)
 
-type Narrow = { options: Option[]; siblingData: Record<string, unknown>; req: { user?: unknown } }
+type Narrow = { options: Option[]; siblingData: Record<string, unknown>; req: PayloadRequest }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = Record<string, any>
 
@@ -32,7 +32,7 @@ export const said = (fields: Field[], label: (english: Label) => Label): Field[]
 })
 
 export const setUp = (settings: Settings): Widget[] => {
-  const { sources, allowed, label } = settings
+  const { sources, label } = settings
 
   // a label that is already in several languages is taken as it is
   const choices = (pick: (from: AnySource) => Record<string, Label>): Option[] =>
@@ -43,9 +43,16 @@ export const setUp = (settings: Settings): Widget[] => {
   /** Only what the chosen source has. */
   const ofSource = ({ options, siblingData }: Narrow) =>
     options.filter(option => typeof option !== 'string' && (!option.value.includes('.') || option.value.startsWith(`${String(siblingData?.source)}.`)))
-  // what a source is asked by its roles is settled here; what follows its collection's access, by the field itself
-  const forViewer = ({ options, req }: Narrow) =>
-    options.filter(option => typeof option !== 'string' && !!sources[option.value] && (!sources[option.value].roles || allowed(sources[option.value].roles as string[], req.user as never)))
+  // who a source says it is for is settled here, where it says so at once: one that has to wait for its answer is
+  // offered, and refused when it is read. What follows its collection's access is settled by the field itself.
+  const forViewer = ({ options, req }: Narrow) => options.filter(option => {
+    if (typeof option === 'string' || !sources[option.value]) return false
+    try {
+      return !!(sources[option.value].access?.({ req }) ?? true)
+    } catch {
+      return false
+    }
+  })
   const collections = Object.fromEntries(Object.entries(sources).map(([name, source]) => [name, source.slug as string]))
   /** Only where the chosen source has any of them. */
   const has = (pick: (from: AnySource) => object | undefined, more = 0) => (data: unknown, sibling: { source?: unknown } | undefined) =>

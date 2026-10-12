@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-widgets",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dashboard widgets for Payload that read from your collections: figures, lists and charts, set up in the config or by whoever is looking.",
   "license": "MIT",
   "author": {

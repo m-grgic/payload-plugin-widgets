@@ -4,7 +4,7 @@ import { RenderServerComponent } from '@payloadcms/ui/elements/RenderServerCompo
 import { contextFor } from '../context'
 import { inWords, Misconfigured, problemsOf, viewProblems } from '../check'
 import { readChart, readFigure, readList, titleOf, type ChartPick, type FigurePick, type ListPick } from '../read'
-import type { Narrowed } from '../data'
+import type { Elevated, Narrowed } from '../data'
 import { mayUse, settingsOf } from '../options'
 import { VIEWS, type Context, type Kind, type More, type Numbers, type Reckoned, type Source } from '../types'
 import { ChartTile, ListTile, Notice, Tile, type ChartContent, type ListContent, type Slots, type TileContent } from './Tiles'
@@ -18,7 +18,8 @@ import { ChartTile, ListTile, Notice, Tile, type ChartContent, type ListContent,
 // Given a source, what is picked from it is checked against what it declares; the widgets somebody set up themselves
 // give its name instead, and what they kept. On the page of one project or one client they are given a scope, and
 // show only what belongs there. Every number is read with the signed-in user's own access, so a widget somebody may
-// not see says so instead of showing figures.
+// not see says so instead of showing figures; `access` says who else it is not for, and a figure or a chart given
+// `overrideAccess` is read with the server's, as the local API has it.
 
 export * from './Tiles'
 export { contextFor }
@@ -43,7 +44,7 @@ type Shown = Slots & {
 const reason = ({ t, payload }: Context, label: string, error: unknown) => {
   const problems = problemsOf(error)
   if (problems) return problems.map(problem => inWords(problem, t)).join(' ')
-  if (error instanceof Error && error.name === 'Unavailable') return t('Not part of your role')
+  if (error instanceof Error && error.name === 'Unavailable') return t('Not available to this account')
   const { status, message } = error as { status?: number; message?: string }
   if (status === 401 || status === 403) return t('Not available to this account')
   payload.logger.error({ err: error, msg: `widgets: "${label}" could not be read` })
@@ -81,8 +82,8 @@ const own = (req: PayloadRequest, kind: Kind, as: string | undefined, props: obj
 const said = ({ t }: Context, action: Slots['action']) => (action ? { ...action, label: t(action.label) } : undefined)
 
 /**
- * Keeps a widget of the project's own (see `widget` in ../options) to the roles it was given: whoever it is not
- * for is told so in its place.
+ * Keeps a widget of the project's own (see `widget` in ../options) to whoever its `access` says it is for: anybody
+ * else is told so in its place.
  *
  *   export const Shortcuts = gated(async ({ req }) => <NoteTile … />)
  */
@@ -94,13 +95,13 @@ export const gated = (Component: (props: WidgetServerProps) => Promise<React.Rea
     const widget = settings.widgets.find(candidate => candidate.slug === widgetSlug)
     if (widget && !await mayUse(settings, req, widget)) {
       const { t } = settings.words(req)
-      return <Notice label={t(widget.label)} name={widget.slug} note={t('Not part of your role')} />
+      return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} />
     }
     return Component(props)
   }
 
 export const Figure = async <S extends CollectionSlug, F extends string, M extends string, K extends string>(
-  { req, label, quiet, name: called, as, data, action, after, ...picked }: Shown & Narrowed<F, K, S> & {
+  { req, label, quiet, name: called, as, data, action, after, ...picked }: Shown & Narrowed<F, K, S> & Elevated & {
     source: Source<S, F, M, Loose, Loose, K> | string
     /** One of the source's measures, or one said in place: `{ avg: 'total' }`. */
     measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>
@@ -139,7 +140,7 @@ export const Records = async <S extends CollectionSlug, F extends string, L exte
 }
 
 export const Chart = async <S extends CollectionSlug, F extends string, M extends string, G extends string, K extends string>(
-  { req, label, quiet, name: called, as, action, after, ...picked }: Shown & Narrowed<F, K, S> & { source: Source<S, F, M, Loose, G, K> | string; measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>; by?: NoInfer<G> | 'time' },
+  { req, label, quiet, name: called, as, action, after, ...picked }: Shown & Narrowed<F, K, S> & Elevated & { source: Source<S, F, M, Loose, G, K> | string; measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>; by?: NoInfer<G> | 'time' },
 ) => {
   if (!req.user) return null
   const pick = picked as ChartPick

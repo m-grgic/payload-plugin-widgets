@@ -73,6 +73,13 @@ export const figureProblems = (pick: { as?: unknown; goal?: unknown; compare?: u
     ? [{ text: 'There is nothing before this to compare it with: give it a period that has a beginning', vars: {} }] : []),
 ]
 
+/** What a widget read with the server's access leaves open: who it is for, and rows nobody could open. */
+export const elevatedProblems = (kind: Kind, widget: { access?: unknown; overrideAccess?: unknown }, source: { access?: unknown }): Problem[] => [
+  ...(widget.overrideAccess && kind === 'list' ? [{ text: 'A list is read as whoever looks at it: only a figure or a chart takes overrideAccess', vars: {} }] : []),
+  ...(widget.overrideAccess && kind !== 'list' && !widget.access && !source.access
+    ? [{ text: 'What is read with overrideAccess has to say who it is for: give it or its source an access', vars: {} }] : []),
+]
+
 /** What a widget picks from its source by name. */
 export interface Names { filter?: string; measure?: string | object; list?: string; by?: string }
 

@@ -3,6 +3,22 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.2.0
+
+Who a widget is for is asked the way Payload asks it of a collection.
+
+- **Changed:** `roles` on a source, a widget and under `custom.widgets` is now `access`, Payload's own `Access`:
+  `roles: ['admin']` becomes `access: ({ req }) => req.user?.role === 'admin'`. The `allowed` option is gone with
+  it, and so is the `Role` type.
+- **Changed:** `home` is `false` or an access function in place of a list of roles: `home: []` becomes
+  `home: false`.
+- **Changed:** "Not part of your role" is no longer said. "Not available to this account" is, for both.
+- An `access` may return a `Where` in place of `true`: the widget then shows only those records.
+- `<Figure>`, `<Records>`, `<Chart>`, `readFigure`, `readList` and `readChart` take an `access` as well.
+- A figure or a chart given `overrideAccess` is read with the server's access, for a total of what its reader may
+  not open. It has to say who it is for, and links to the list only for those the collection lets read.
+- `context.req` is there for a filter, a measure and a list.
+
 ## 0.1.0
 
 The first version.
