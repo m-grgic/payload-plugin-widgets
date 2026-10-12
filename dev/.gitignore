@@ -1,0 +1,7 @@
+.next
+node_modules
+next-env.d.ts
+payload-types.ts
+# written by `next dev`
+AGENTS.md
+CLAUDE.md
