@@ -3,7 +3,8 @@ import { dateProblems, figureProblems, measureProblems, seriesProblems, Misconfi
 import { accessTo, readable, sourceCalled } from './options'
 import { after } from './time'
 import { months, timed as atMoments } from './when'
-import { amountOf, CALLED, calcOf, combined, currencyOf, fetched, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
+import { countOf, made, tallied, type Cell, type Dim } from './tally'
+import { amountOf, CALLED, calcOf, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
 
 // What a widget shows, read out of a source: a figure, a short list, or bars over time or by group.
 // The same three serve the dashboard and any other page, which may pass a scope: one project, one client.
@@ -315,20 +316,6 @@ const SERIES = 5
 
 type Row = Record<string, unknown>
 
-/** The values a record has in a field, as text: what it points at by its id, and one of nothing where it has none. */
-const valuesOf = (doc: Row, field: string): string[] => {
-  const value = doc[field]
-  const keys = (Array.isArray(value) ? value : [value]).filter(key => key !== null && key !== undefined && key !== '')
-  return keys.length ? keys.map(key => (typeof key === 'object' ? String((key as { id: unknown }).id) : String(key))) : ['']
-}
-
-/** The amounts of the records, each under what it belongs to. */
-const sorted = (docs: Row[], amount: Amount<Row>, keysOf: (doc: Row) => string[]) => {
-  const each = new Map<string, number[]>()
-  for (const doc of docs) for (const key of keysOf(doc)) each.set(key, [...(each.get(key) ?? []), amount.of(doc)])
-  return each
-}
-
 export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartReading> => {
   const { source, narrowed, context, linked } = await from(asked, pick, 'chart')
   sound(context, source, pick, 'chart')
@@ -350,63 +337,15 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     else if (!start) timed = { ...pick, period: 'custom', from: `${after(`${last.slice(0, 7)}-01`, -340).slice(0, 7)}-01`, to: end ?? undefined }
   }
 
-  // money is drawn in one currency; what is in another is said, not added
-  const main = context.currency.toUpperCase()
-  const read = async (measure: Measure) => {
-    const amount = measure.amount as Amount<Row>
-    const { selection } = chosen(context, source, timed, measure.filter, narrowed)
-    const docs = await fetched<Row>(context, source, selection, [...new Set([...amount.select, by ?? date, ...(apart ? [apart] : [])])])
-    return {
-      measure, amount, selection, docs,
-      kept: amount.format === 'money' ? docs.filter(doc => currencyOf(context, amount, doc) === main) : docs,
-      show: (value: number) => shown(context, amount.format, new Map([[amount.format === 'money' ? main : '', value]])),
-    }
-  }
-  // each measure has its own records: one may count only some of them
-  const all = await Promise.all(measures.map(measure => read(measure as Measure)))
-  const [first] = all
-  const { selection } = first
-  const whole = (docs: Row[], amount: Amount<Row>) => combined(amount.how, docs.map(amount.of))
-
-  const left = Math.max(...all.map(one => one.docs.length - one.kept.length))
-  const note = [
-    // of several, each says its own
-    all.length > 1 ? '' : first.show(whole(first.kept, first.amount)),
-    left ? context.t('{count} in another currency left out', { count: left }) : '',
-    // more than can be read at once: said, so the chart is not taken for all of them
-    all.some(one => one.docs.length >= MANY) ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
-  ].filter(Boolean).join(' · ')
-  const href = linked ? context.list(source.slug, selection.filter) : undefined
-  const empty = context.t('Nothing to show yet')
-  if (all.every(one => !one.kept.length)) return { note, href, empty, bars: [] }
-
-  // what is drawn at once: the measures, or the records of the one measure told apart by what they have in a field
-  let parts = all.map((one, index) => ({
-    key: typeof picked[index] === 'string' ? picked[index] as string : calcOf(picked[index])?.join('-') ?? 'count',
-    label: context.t(one.measure.label), docs: one.kept, amount: one.amount, show: one.show,
-  }))
-  if (apart) {
-    const each = new Map<string, Row[]>()
-    for (const doc of first.kept) for (const key of valuesOf(doc, apart)) each.set(key, [...(each.get(key) ?? []), doc])
-    const ranked = [...each].sort((a, b) => whole(b[1], first.amount) - whole(a[1], first.amount))
-    const names = await called(context, source, apart, ranked.slice(0, SERIES).map(([key]) => key).filter(Boolean))
-    const rest = ranked.slice(SERIES).flatMap(([, docs]) => docs)
-    parts = [
-      ...ranked.slice(0, SERIES).map(([key, docs]) => ({ key: key || '_none', label: key ? names.get(key) ?? `#${key}` : context.t('None'), docs, amount: first.amount, show: first.show })),
-      ...(rest.length ? [{ key: '_other', label: context.t('Other'), docs: rest, amount: first.amount, show: first.show }] : []),
-    ]
-  }
-
   // the bars there are, and which of them a record belongs to. `keys` of none is whatever no other bar has.
-  let slots: { label: string; keys?: string[]; href?: string }[]
-  let keysOf: (doc: Row) => string[]
+  let slots: { label: string; keys?: string[]; href?: string }[] = []
+  let daily = false
   if (!by) {
     const { start: from, end } = span(context, timed)
     const start = from as string
     const last = end && end < context.today ? end : end ?? context.today
     // by day up to two months, by month beyond
-    const daily = (new Date(last).getTime() - new Date(start).getTime()) / 86400000 <= 62
-    slots = []
+    daily = (new Date(last).getTime() - new Date(start).getTime()) / 86400000 <= 62
     // every month or day in the period has its bar, also the empty ones
     for (let at = new Date(`${daily ? start : `${start.slice(0, 7)}-01`}T00:00:00Z`); at.toISOString().slice(0, 10) <= last;) {
       const key = at.toISOString().slice(0, daily ? 10 : 7)
@@ -414,11 +353,72 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
       if (daily) at.setUTCDate(at.getUTCDate() + 1)
       else at.setUTCMonth(at.getUTCMonth() + 1)
     }
-    keysOf = doc => (typeof doc[date] === 'string' ? [context.date(doc[date] as string).slice(0, daily ? 10 : 7)] : [])
-  } else {
-    keysOf = doc => valuesOf(doc, by)
+  }
+  // what the records are told apart by: first what a bar stands for, then what a series does
+  const dims: Dim[] = [by ? { field: by } : { date, daily }, ...(apart ? [{ field: apart }] : [])]
+
+  // money is drawn in one currency; what is in another is said, not added
+  const main = context.currency.toUpperCase()
+  const read = async (measure: Measure) => {
+    const amount = measure.amount as Amount<Row>
+    const { selection } = chosen(context, source, timed, measure.filter, narrowed)
+    const tally = await tallied(context, source, selection, amount, dims)
+    const over = (...which: number[]) => (amount.format === 'money' ? tally.over(...which).filter(cell => cell.currency === main) : tally.over(...which))
+    const found = countOf(over())
+    return {
+      measure, amount, selection, over, found, cut: tally.cut,
+      left: countOf(tally.over()) - found,
+      total: made(amount.how, over()),
+      show: (value: number) => shown(context, amount.format, new Map([[amount.format === 'money' ? main : '', value]])),
+    }
+  }
+  // each measure has its own records: one may count only some of them
+  const all = await Promise.all(measures.map(measure => read(measure as Measure)))
+  const [first] = all
+  const { selection } = first
+
+  const left = Math.max(...all.map(one => one.left))
+  const note = [
+    // of several, each says its own
+    all.length > 1 ? '' : first.show(first.total),
+    left ? context.t('{count} in another currency left out', { count: left }) : '',
+    // more than can be read at once: said, so the chart is not taken for all of them
+    all.some(one => one.cut) ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
+  ].filter(Boolean).join(' · ')
+  const href = linked ? context.list(source.slug, selection.filter) : undefined
+  const empty = context.t('Nothing to show yet')
+  if (all.every(one => !one.found)) return { note, href, empty, bars: [] }
+
+  /** What was added up, under whichever of its headings is asked for. */
+  const under = (cells: Cell[], heading: number) => {
+    const each = new Map<string, Cell[]>()
+    for (const cell of cells) each.set(cell.keys[heading], [...(each.get(cell.keys[heading]) ?? []), cell])
+    return each
+  }
+  const ranked = (cells: Cell[]) => [...under(cells, 0)].map(([key, mine]) => [key, made(first.amount.how, mine)] as const).sort((a, b) => b[1] - a[1])
+
+  // what is drawn at once: the measures, or the records of the one measure told apart by what they have in a field.
+  // `cells` are what each comes to bar by bar.
+  let parts = all.map((one, index) => ({
+    key: typeof picked[index] === 'string' ? picked[index] as string : calcOf(picked[index])?.join('-') ?? 'count',
+    label: context.t(one.measure.label), total: one.total, cells: one.over(0), amount: one.amount, show: one.show,
+  }))
+  if (apart) {
+    const most = ranked(first.over(1))
+    const top = most.slice(0, SERIES)
+    const names = await called(context, source, apart, top.map(([key]) => key).filter(Boolean))
+    const each = under(first.over(0, 1), 1)
+    const rest = most.slice(SERIES).flatMap(([key]) => each.get(key) ?? [])
+    parts = [
+      ...top.map(([key, total]) => ({ key: key || '_none', label: key ? names.get(key) ?? `#${key}` : context.t('None'), total, cells: each.get(key) ?? [], amount: first.amount, show: first.show })),
+      // what is left over is made one the same way: the average of the rest, not the sum of their averages
+      ...(rest.length ? [{ key: '_other', label: context.t('Other'), total: made(first.amount.how, first.over(1).filter(cell => !top.some(([key]) => key === cell.keys[0]))), cells: rest, amount: first.amount, show: first.show }] : []),
+    ]
+  }
+
+  if (by) {
     // the most of the first measure come first
-    const most = [...sorted(first.kept, first.amount, keysOf)].map(([key, values]) => [key, combined(first.amount.how, values)] as const).sort((a, b) => b[1] - a[1]).slice(0, MOST)
+    const most = ranked(first.over(0)).slice(0, MOST)
     const names = await called(context, source, by, most.map(([key]) => key).filter(Boolean))
     slots = most.map(([key]) => ({
       label: key ? names.get(key) ?? `#${key}` : context.t('None'), keys: [key],
@@ -428,18 +428,18 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
   }
 
   const named = new Set(slots.flatMap(slot => slot.keys ?? []))
-  const barsOf = (docs: Row[], amount: Amount<Row>, show: (value: number) => string, links: boolean): Bar[] => {
-    const each = sorted(docs, amount, keysOf)
+  const barsOf = (cells: Cell[], amount: Amount<Row>, show: (value: number) => string, links: boolean): Bar[] => {
+    const each = under(cells, 0)
     return slots.map(slot => {
       // what is left over is made one the same way: the average of the rest, not the sum of their averages
-      const value = combined(amount.how, slot.keys ? slot.keys.flatMap(key => each.get(key) ?? []) : [...each].flatMap(([key, values]) => (named.has(key) ? [] : values)))
+      const value = made(amount.how, slot.keys ? slot.keys.flatMap(key => each.get(key) ?? []) : [...each].flatMap(([key, mine]) => (named.has(key) ? [] : mine)))
       // over time a day of nothing says nothing
       return { label: slot.label, amount: value, shown: value || by ? show(value) : '', ...(links && slot.href ? { href: slot.href } : {}) }
     })
   }
-  let bars = barsOf(first.kept, first.amount, first.show, true)
+  let bars = barsOf(first.over(0), first.amount, first.show, true)
   const several = parts.length > 1 || !!apart
-  let series = several ? parts.map(part => ({ part, bars: barsOf(part.docs, part.amount, part.show, false) })) : []
+  let series = several ? parts.map(part => ({ part, bars: barsOf(part.cells, part.amount, part.show, false) })) : []
   // nothing is left over unless something is
   const over = by ? slots.length - 1 : -1
   if (over >= 0 && ![bars, ...series.map(one => one.bars)].some(drawn => drawn[over].amount)) {
@@ -454,7 +454,7 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
   const shared = Math.max(...series.map(one => peakOf(one.bars)), 0)
   return {
     note, href, empty, bars,
-    series: series.map(({ part, bars: drawn }) => ({ key: part.key, label: part.label, total: part.show(whole(part.docs, part.amount)), peak: alike ? shared : peakOf(drawn), bars: drawn })),
+    series: series.map(({ part, bars: drawn }) => ({ key: part.key, label: part.label, total: part.show(part.total), peak: alike ? shared : peakOf(drawn), bars: drawn })),
     // parts of one whole stand on one another
     stacked: !!apart && (!first.amount.how || first.amount.how === 'sum'),
   }

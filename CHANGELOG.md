@@ -3,6 +3,19 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.4.0
+
+Sums without a ceiling on Postgres, and reads that can be kept.
+
+- **Changed:** on Postgres a sum, an average, a lowest, a highest and a chart of a field are added up by the
+  database in one query, with the access of whoever asks: the 5,000 records a tile could count no longer apply
+  there. A measure worked out by a function, a field with read access or an `afterRead` hook, a collection with
+  drafts and every other database are read record by record as before. `sums: 'records'` keeps to that always.
+- **Added:** `cache`: for how many seconds what a figure or a chart read is kept, for each person apart, and
+  forgotten when a record of the collection changes.
+- **Added:** `Amount.plain`, which `sum(…)` and a measure said in place set by themselves: what lets the
+  database do the adding.
+
 ## 0.3.0
 
 Charts with several series, and views that run in the browser.

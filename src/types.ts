@@ -1,4 +1,7 @@
 import type { Access, CollectionSlug, DataFromCollectionSlug, Payload, PayloadRequest, Where, WhereField } from 'payload'
+import { combined, counted, countOf, currencyOf, fetched, made, MANY, tallied } from './tally'
+
+export { combined, counted, currencyOf, fetched, MANY }
 
 // What a collection offers to the widgets: the sets of its records worth looking at (filters), what can be told about
 // a set (measures: a count, a sum, or a figure worked out by a function), short lists, and what it can be split by.
@@ -94,6 +97,12 @@ export interface Context {
   month: (date: string) => string
   /** The day a week starts on: 0 for Sunday to 6 for Saturday. */
   weekStartsOn: number
+  /** The time zone the widgets were given: UTC where it is left out. */
+  zone?: string
+  /** `'records'` where nothing is to be added up by the database (see `sums` in the options). */
+  sums?: 'database' | 'records'
+  /** For how many seconds what was read is kept (see `cache` in the options). */
+  cache?: number
 }
 
 /**
@@ -247,6 +256,11 @@ export interface Amount<D> {
   unit?: [string, string]
   /** Declared without saying how it is written: the field says, where the plugin finds it in the collection. */
   loose?: true
+  /**
+   * Where it is no more than what is in a field, or one for every record where no field is named: which field, and
+   * the one that holds its currency. With it the database can do the adding (see ./tally).
+   */
+  plain?: { field?: string; currency?: string }
 }
 
 /** A measure as a source can declare it in place: `{ avg: 'total', format: 'money', currency: 'currency' }`. */
@@ -360,21 +374,6 @@ export const source = <
   return { ...definition, slug, filters, measures: 'count' in measures ? measures : { count: count(), ...measures } } as Loose
 }
 
-/** How many records a sum or a chart reads at most. */
-export const MANY = 5000
-
-/** Every record of a selection with only the fields asked for, whatever the source. */
-export const fetched = async <D>(context: Context, from: AnySource, selection: Selection, select: string[], more: { limit?: number; sort?: string } = {}): Promise<D[]> => {
-  // generic over the collection, which the typed local API cannot follow
-  const { docs } = await (context.payload.find as Loose)({
-    ...context.as, collection: from.slug, where: selection.where, pagination: false, limit: more.limit ?? MANY,
-    ...(more.sort ? { sort: more.sort } : {}),
-    ...(from.draft ? { draft: true } : {}),
-    ...(select.length ? { select: Object.fromEntries(select.map(field => [field, true])) } : {}),
-  })
-  return docs
-}
-
 /** A record with only the fields that were asked for, and its id. */
 export type Selected<S extends CollectionSlug, K extends keyof Doc<S>> = Pick<Doc<S>, K | ('id' & keyof Doc<S>)>
 
@@ -383,28 +382,10 @@ export const records = <S extends CollectionSlug, const K extends keyof Doc<S> &
   context: Context, from: From<S>, selection: Selection, select: K[], more: { limit?: number; sort?: Sort<S> } = {},
 ): Promise<Selected<S, K>[]> => fetched(context, from, selection, select, more)
 
-export const counted = async (context: Context, from: AnySource, selection: Selection): Promise<number> =>
-  from.draft
-    // counting does not know about drafts, so the latest versions are read and counted
-    ? (await fetched(context, from, selection, [])).length
-    : (await (context.payload.count as Loose)({ ...context.as, collection: from.slug, where: selection.where })).totalDocs
-
 export const shown = (context: Context, format: Format, totals: Map<string, number>) => {
   if (format === 'money') return totals.size ? context.total(totals) : context.money(0, context.currency)
   const amount = [...totals.values()].reduce((sum, value) => sum + value, 0)
   return format === 'hours' ? context.hours(amount) : context.number(amount)
-}
-
-/** The currency a record's amount is in. */
-export const currencyOf = <D>(context: Context, amount: Amount<D>, doc: D) => (amount.currency?.(doc) || context.currency).toUpperCase()
-
-/** Many numbers as one: added up unless said otherwise. Nothing counts as nought. */
-export const combined = (how: Calc | undefined, values: number[]) => {
-  if (!values.length) return 0
-  if (how === 'min') return values.reduce((least, value) => Math.min(least, value))
-  if (how === 'max') return values.reduce((most, value) => Math.max(most, value))
-  const total = values.reduce((sum, value) => sum + value, 0)
-  return how === 'avg' ? total / values.length : total
 }
 
 /** The records' amounts made one as the measure has it, per currency where they are money. */
@@ -423,16 +404,17 @@ export const reckoned = <S extends CollectionSlug = Loose>(label: Label, amount:
   amount,
   ...(more.filter ? { filter: more.filter as never } : {}),
   read: async (context, selection, from) => {
-    const docs = await fetched<Doc<S>>(context, from, selection, amount.select)
-    const totals = added(context, docs, amount)
-    // more than can be read at once: said, so the figure is not taken for all of them
-    const cut = docs.length >= MANY
+    const { over, cut } = await tallied(context, from, selection, amount)
+    const cells = over()
+    const totals = new Map(cells.map(cell => [cell.currency, made(amount.how, [cell])]))
+    const found = countOf(cells)
     return {
       value: shown(context, amount.format, totals),
       // of money, what is in the currency the widgets were given
       amount: totals.get(amount.format === 'money' ? context.currency.toUpperCase() : '') ?? 0,
+      // more than can be read at once: said, so the figure is not taken for all of them
       note: cut ? context.t('Only the first {count} are counted', { count: context.number(MANY) })
-        : docs.length ? context.plural(docs.length, amount.unit?.[0] ?? 'record', amount.unit?.[1] ?? 'records') : context.t('Nothing recorded yet'),
+        : found ? context.plural(found, amount.unit?.[0] ?? 'record', amount.unit?.[1] ?? 'records') : context.t('Nothing recorded yet'),
       ...(cut ? { tone: 'warn' as const } : {}),
     }
   },
@@ -447,6 +429,7 @@ export const amountOf = (field: string, format: Format, how: Calc, currency?: st
   of: doc => Number(doc[field]) || 0,
   format,
   how,
+  plain: { field, ...(currency ? { currency } : {}) },
   ...(currency ? { currency: doc => (doc[currency] ? String(doc[currency]) : undefined) } : {}),
 })
 
@@ -465,7 +448,7 @@ const declared = (name: string, spec: MeasureSpec): Measure => {
 export const count = (label: Label = 'How many'): Measure<Loose, never> => ({
   label,
   counts: true,
-  amount: { select: [], of: () => 1, format: 'number' },
+  amount: { select: [], of: () => 1, format: 'number', plain: {} },
   read: async (context, selection, from) => {
     const found = await counted(context, from, selection)
     return { value: String(found), amount: found }
@@ -485,6 +468,8 @@ export const sum = <S extends CollectionSlug>(label: Label, field: keyof Doc<S> 
     select: [field, ...(more.currency ? [more.currency] : []), ...(more.select ?? [])],
     of: more.of ?? (doc => Number(doc[field]) || 0),
     format,
+    // counted as its field and nothing else, the database can add it up
+    ...(more.of || more.select ? {} : { plain: { field, ...(more.currency ? { currency: more.currency } : {}) } }),
     ...(more.note ? { unit: more.note } : {}),
     ...(more.currency ? { currency: doc => (doc[more.currency as keyof D] ? String(doc[more.currency as keyof D]) : undefined) } : {}),
   }

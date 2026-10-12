@@ -37,6 +37,7 @@ a drawer, a project puts some there ready-made, and the same three can stand on 
 - [Languages, time and numbers](#languages-time-and-numbers)
 - [Styling](#styling)
 - [Reference](#reference)
+- [Where the adding is done](#where-the-adding-is-done)
 - [Limits](#limits)
 - [Troubleshooting](#troubleshooting)
 - [The demo](#the-demo)
@@ -788,6 +789,8 @@ widgetsPlugin({
   weekStartsOn,  // 1
   currency,      // 'EUR'
   format,        // (value, { style, locale, currency }) => string | undefined
+  sums,          // 'database'; 'records' to read record by record always
+  cache,         // seconds what was read is kept for; nothing is kept without it
 })
 ```
 
@@ -821,17 +824,47 @@ What a filter's function, a measure's `read` and a list's `row` are handed:
 | `t(text, vars?)`, `plural(count, one, many)` | in the language of the request |
 | `number`, `hours(minutes)`, `money(amount, currency)`, `total(perCurrency)`, `day(date)`, `month(date)` | written as that language writes them |
 
+## Where the adding is done
+
+**On Postgres, by the database.** A sum, an average, a lowest, a highest and every chart of a field are one query
+that groups and adds, however many records there are. The query is built by Payload the way it builds one to
+count, with the collection's `access` for whoever asks (or without, under `overrideAccess`), so it comes to what
+reading the records would.
+
+**Anywhere else, record by record**, at most 5,000 of them, with a tile that says so beyond that. That is MongoDB
+and SQLite, and on Postgres whatever the database does not hold just as a record shows it:
+
+- a measure worked out by a function (`sum(…, { of })`, or a `read` of your own),
+- a field with `access.read` or an `afterRead` hook, a virtual or a localized one, one that holds several
+  (`hasMany`), and any field of a collection that has an `afterRead` hook of its own,
+- a collection read with its drafts (`draft: true` on its source).
+
+Nothing has to be said for either: each figure goes the way it can. `sums: 'records'` has everything read record
+by record, which is the place to look first should a number ever differ.
+
+**Kept for a while, where you say so.** With `cache: 60` what a figure or a chart read is kept for a minute, so a
+dashboard opened ten times asks the database once. It is kept for each person apart, as what they may read
+differs; what is read under `overrideAccess` is the same for everybody and kept once. A record of the collection
+that is created, changed or deleted through Payload has it forgotten at once. Lists are never kept.
+
+```ts
+widgetsPlugin({ cache: 60 })
+```
+
+It is kept in the memory of the server: on serverless hosting each instance keeps its own, and one instance does
+not hear of a change made through another before the seconds are up.
+
 ## Limits
 
-- **A sum or a chart reads at most 5,000 records** and works them out in memory, so it is the same on every
-  database. Beyond that the tile says "Only the first 5,000 are counted": narrow it with a period or a filter.
-  Counts have no such limit.
+- **Where the database does not do the adding, a sum or a chart reads at most 5,000 records** and works them
+  out in memory. Beyond that the tile says "Only the first 5,000 are counted": narrow it with a period or a
+  filter. Counts have no such limit. See [Where the adding is done](#where-the-adding-is-done).
 - A chart of money is drawn in one currency, the one the plugin was given; records in another are left out, and
   the tile says how many. A figure of money says each currency's total.
 - A list is drawn as rows; another way only by a view of your own.
 - Groups, measures and dates are a collection's own top-level fields: nothing inside a named group, an array or a
   block is found. A relationship to more than one collection is not a group.
-- There is no caching: a tile is read when the page is.
+- A tile is read when the page is, unless the plugin is given a `cache`: see [Where the adding is done](#where-the-adding-is-done).
 
 ## Troubleshooting
 

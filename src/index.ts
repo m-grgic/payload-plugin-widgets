@@ -1,6 +1,7 @@
-import type { CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
+import type { CollectionConfig, CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
 import { dateProblems, elevatedProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
+import { forgotten } from './tally'
 import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
 
 // Dashboard widgets that read from the collections. Without anything declared, every collection is a source as its
@@ -138,8 +139,18 @@ export const widgetsPlugin = (options: Options = {}): Plugin => Object.assign((c
   // nor is a way of the project's own to draw one
   const views = Object.fromEntries(Object.entries(settings.views).map(([name, view]) => [`widgets-view-${name}`, { path: view.Component, type: 'component' as const }]))
 
+  // what is kept of a collection is good until one of its records changes
+  const fresh = (collection: CollectionConfig): CollectionConfig => {
+    const forget = <D>({ doc }: { doc: D }) => {
+      forgotten(collection.slug)
+      return doc
+    }
+    return { ...collection, hooks: { ...collection.hooks, afterChange: [...(collection.hooks?.afterChange ?? []), forget], afterDelete: [...(collection.hooks?.afterDelete ?? []), forget] } }
+  }
+
   return {
     ...config,
+    ...(settings.cache && config.collections ? { collections: config.collections.map(fresh) } : {}),
     custom: { ...config.custom, [KEY]: settings },
     onInit: async payload => {
       await config.onInit?.(payload)

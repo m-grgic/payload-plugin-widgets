@@ -226,6 +226,17 @@ export interface Options {
    *   format: (value, { style, currency }) => style === 'money' ? `${value.toFixed(2)} ${currency}` : undefined
    */
   format?: (value: number, as: { style: Format; locale: string; currency?: string }) => string | undefined
+  /**
+   * A sum, an average and a chart of a field are added up by the database where it is Postgres, and where that
+   * comes to what reading the records would. `'records'` to have them always read record by record instead.
+   */
+  sums?: 'database' | 'records'
+  /**
+   * For how many seconds what a figure and a chart read is kept, for each person apart: the dashboard then asks
+   * the database once for as many times as it is opened. Forgotten when a record of the collection changes.
+   * Nothing is kept where it is left out.
+   */
+  cache?: number
 }
 
 /** How things are said to whoever makes a request. */
@@ -248,6 +259,9 @@ export interface Settings {
   currency: string
   /** A number as it is shown: an amount in a currency, a plain number, or hours. */
   format: (value: number, style: Format, locale: string, currency?: string) => string
+  sums: 'database' | 'records'
+  /** In seconds; nought for nothing kept. */
+  cache: number
 }
 
 const fill = (text: string, vars?: Vars) => (vars ? text.replace(/\{(\w+)\}/g, (whole, key) => (key in vars ? String(vars[key]) : whole)) : text)
@@ -280,6 +294,8 @@ export const settled = (options: Options, config: Config): Settings => {
     timeZone: options.timeZone ?? 'UTC',
     weekStartsOn: options.weekStartsOn ?? 1,
     currency: (options.currency ?? 'EUR').toUpperCase(),
+    sums: options.sums ?? 'database',
+    cache: Math.max(0, Number(options.cache) || 0),
     format: (value, style, locale, currency) => {
       const own = options.format?.(value, { style, locale, ...(currency ? { currency } : {}) })
       if (own !== undefined) return own
