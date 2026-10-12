@@ -1,0 +1,81 @@
+{
+  "name": "payload-plugin-widgets",
+  "version": "0.1.0",
+  "description": "Dashboard widgets for Payload that read from your collections: figures, lists and charts, set up in the config or by whoever is looking.",
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "keywords": [
+    "payload",
+    "payload-plugin",
+    "payloadcms",
+    "dashboard",
+    "widgets"
+  ],
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./rsc": {
+      "types": "./src/exports/rsc.ts",
+      "default": "./src/exports/rsc.ts"
+    },
+    "./client": {
+      "types": "./src/exports/client.ts",
+      "default": "./src/exports/client.ts"
+    },
+    "./widgets.css": "./src/widgets.css"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./rsc": {
+        "types": "./dist/exports/rsc.d.ts",
+        "default": "./dist/exports/rsc.js"
+      },
+      "./client": {
+        "types": "./dist/exports/client.d.ts",
+        "default": "./dist/exports/client.js"
+      },
+      "./widgets.css": "./dist/widgets.css"
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "peerDependencies": {
+    "@payloadcms/ui": "^3.90.0",
+    "next": "^15.4.0 || ^16.0.0",
+    "payload": "^3.90.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@payloadcms/ui": "^3.90.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "next": "^16.3.8",
+    "payload": "^3.90.2",
+    "react": "^19.3.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": "^18.20.2 || >=20.9.0"
+  }
+}

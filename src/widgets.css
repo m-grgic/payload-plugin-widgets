@@ -1,0 +1,377 @@
+/*
+ * The tiles the widgets are drawn as: a figure, a list, a chart, quick actions and a note. The components include
+ * this themselves: there is nothing to add to the admin's stylesheet.
+ *
+ * What a project changes, from its own stylesheet:
+ *
+ * 1. The variables below, anywhere a tile can inherit them from. Left alone, each is the admin's own, so the tiles
+ *    follow its theme.
+ *
+ *      :root { --widgets-accent: var(--theme-warning-500); --widgets-radius: 0; }
+ *
+ *      --widgets-accent        the dot of a tile that is doing fine, and a chart's bars
+ *      --widgets-warn          the dot of one that wants attention
+ *      --widgets-bad           the dot of one that is late, and what is late in a list
+ *      --widgets-link          the links of a tile: "+ New", and a project's own
+ *      --widgets-bg            a tile's background, and --widgets-bg-hover under the pointer
+ *      --widgets-border        its border, and --widgets-border-hover under the pointer
+ *      --widgets-radius        its corners
+ *      --widgets-padding       the room inside it
+ *      --widgets-text          what it says
+ *      --widgets-muted         what it says under that: notes, the details of a row, a bar's amount
+ *      --widgets-label         what it is called
+ *      --widgets-label-size, --widgets-value-size, --widgets-text-size, --widgets-note-size
+ *      --widgets-chart-height  how tall columns and a line are drawn, and --widgets-spark-height the line under a figure
+ *
+ * 2. The classes: `.widgets-tile` with `__label`, `__value`, `__progress`, `__note`, `__head`, `__rows`, `__late`, `__action`,
+ *    `__add`; `.widgets-chart` with `__label`, `__bar`, `__value`; `.widgets-columns` with `__bar`, `__label`;
+ *    `.widgets-line` with `__stroke`, `__area`, `__labels`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
+ *
+ * 3. What each tile says of itself: `data-kind` (figure, list, chart, notice, note), `data-tone` (calm, warn, bad),
+ *    `data-view` (number, progress, sparkline; bars, columns, line), on a figure that is compared `data-trend` (up,
+ *    down, flat) and, on a ready-made widget, `data-widget` with its slug.
+ *
+ *      .widgets-tile[data-widget='unpaid-invoices'] { --widgets-value-size: 40px; }
+ *      .widgets-tile[data-tone='bad'] { --widgets-border: var(--theme-error-500); }
+ */
+/* above the admin's own styles, below anything a project writes outside a layer */
+@layer payload-default, widgets;
+@layer widgets {
+  .widgets-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    /* a dashboard widget fills the cell it is given */
+    height: 100%;
+    min-width: 0;
+    padding: var(--widgets-padding, calc(var(--base) * 0.9));
+    background: var(--widgets-bg, var(--theme-bg));
+    border: 1px solid var(--widgets-border, var(--theme-border-color));
+    border-radius: var(--widgets-radius, var(--style-radius-m));
+    color: var(--widgets-text, var(--theme-text));
+    text-decoration: none;
+    transition: border-color 100ms, background 100ms;
+  }
+  .widgets-tile:hover {
+    background: var(--widgets-bg-hover, var(--theme-elevation-50));
+    border-color: var(--widgets-border-hover, var(--theme-elevation-300));
+  }
+  .widgets-tile:focus-visible {
+    outline: var(--accessibility-outline);
+    outline-offset: 2px;
+  }
+  /* a tile that is not one link as a whole: a list, a chart, a figure with something under it */
+  .widgets-tile--plain {
+    gap: calc(var(--base) * 0.5);
+  }
+  .widgets-tile--plain:hover {
+    background: var(--widgets-bg, var(--theme-bg));
+    border-color: var(--widgets-border, var(--theme-border-color));
+  }
+  /* one that only says why there is nothing to show */
+  .widgets-tile[data-kind=notice] {
+    gap: 6px;
+  }
+  .widgets-tile__label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--widgets-label-size, 12px);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--widgets-label, var(--theme-elevation-550));
+  }
+  .widgets-tile__label:before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--widgets-accent, var(--theme-success-500));
+  }
+  .widgets-tile[data-tone=warn] .widgets-tile__label:before {
+    background: var(--widgets-warn, var(--theme-warning-500));
+  }
+  .widgets-tile[data-tone=bad] .widgets-tile__label:before {
+    background: var(--widgets-bad, var(--theme-error-500));
+  }
+  .widgets-tile__value {
+    font-size: var(--widgets-value-size, 28px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+    font-variant-numeric: tabular-nums;
+  }
+  /* how far towards its goal a figure is */
+  .widgets-tile__progress {
+    display: block;
+    height: 6px;
+    margin: 4px 0 2px;
+    border-radius: 3px;
+    background: var(--theme-elevation-100);
+  }
+  .widgets-tile__progress span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--widgets-accent, var(--theme-success-500));
+  }
+  .widgets-tile__note {
+    font-size: var(--widgets-note-size, 13px);
+    color: var(--widgets-muted, var(--theme-elevation-650));
+  }
+  /* a figure with something of the project's own under it: only the figure is the link */
+  .widgets-tile__figure {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .widgets-tile__action {
+    color: var(--widgets-link, var(--theme-success-600));
+    font-size: var(--widgets-note-size, 13px);
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .widgets-tile__action:hover {
+    text-decoration: underline;
+  }
+  .widgets-tile > .widgets-tile__action {
+    align-self: flex-start;
+    white-space: normal;
+  }
+  /* a heading that links to all of them, and what a project adds beside it */
+  .widgets-tile__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .widgets-tile__head > a:first-child {
+    display: flex;
+    flex: 1;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .widgets-tile__rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .widgets-tile__rows li + li {
+    border-top: 1px solid var(--widgets-border, var(--theme-border-color));
+  }
+  .widgets-tile__rows a {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 0;
+    font-size: var(--widgets-text-size, 14px);
+    color: var(--widgets-text, var(--theme-text));
+    text-decoration: none;
+  }
+  .widgets-tile__rows a:hover span:first-child {
+    text-decoration: underline;
+  }
+  .widgets-tile__rows span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .widgets-tile__rows span:last-child {
+    flex-shrink: 0;
+    color: var(--widgets-muted, var(--theme-elevation-650));
+    font-variant-numeric: tabular-nums;
+  }
+  .widgets-tile__rows .widgets-tile__late {
+    color: var(--widgets-bad, var(--theme-error-600));
+    font-weight: 600;
+  }
+  /* a box at the foot of a list that adds one by its title */
+  .widgets-tile__add input {
+    width: 100%;
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px dashed var(--widgets-border, var(--theme-border-color));
+    border-radius: var(--style-radius-s);
+    color: var(--widgets-text, var(--theme-text));
+    font: inherit;
+    font-size: var(--widgets-note-size, 13px);
+  }
+  .widgets-tile__add input:focus {
+    background: var(--theme-input-bg);
+    border-style: solid;
+  }
+  .widgets-tile__error {
+    margin: 0;
+    color: var(--widgets-bad, var(--theme-error-600));
+    font-size: var(--widgets-text-size, 14px);
+  }
+  /* bars: what each is of, how much of the most, and the amount */
+  .widgets-chart {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .widgets-chart li > a,
+  .widgets-chart li > div {
+    display: grid;
+    grid-template-columns: minmax(64px, 30%) 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    font-size: var(--widgets-text-size, 14px);
+    color: var(--widgets-text, var(--theme-text));
+    text-decoration: none;
+  }
+  .widgets-chart li > a:hover .widgets-chart__label {
+    text-decoration: underline;
+  }
+  .widgets-chart__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .widgets-chart__bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--theme-elevation-100);
+  }
+  .widgets-chart__bar span {
+    display: block;
+    height: 100%;
+    min-width: 0;
+    border-radius: 3px;
+    background: var(--widgets-accent, var(--theme-success-500));
+  }
+  /* columns: side by side, as tall as each is of the most */
+  .widgets-columns {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    height: var(--widgets-chart-height, 140px);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .widgets-columns li {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .widgets-columns li > a,
+  .widgets-columns li > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    color: var(--widgets-muted, var(--theme-elevation-650));
+    text-decoration: none;
+  }
+  .widgets-columns li > a:hover .widgets-columns__bar span {
+    opacity: 0.75;
+  }
+  .widgets-columns__bar {
+    display: flex;
+    flex: 1;
+    align-items: flex-end;
+    align-self: stretch;
+    border-bottom: 1px solid var(--theme-elevation-100);
+  }
+  .widgets-columns__bar span {
+    display: block;
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+    background: var(--widgets-accent, var(--theme-success-500));
+  }
+  /* one of many is wider than its column: it runs on under the ones after it that are not named */
+  .widgets-columns__label {
+    flex: none;
+    align-self: flex-start;
+    height: 1.3em;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* a line: stretched to the tile, as thick wherever it is */
+  .widgets-line {
+    display: block;
+  }
+  .widgets-line svg {
+    display: block;
+    width: 100%;
+    height: var(--widgets-chart-height, 140px);
+    overflow: visible;
+  }
+  /* under a figure: what it was, small */
+  .widgets-line--spark svg {
+    height: var(--widgets-spark-height, 36px);
+  }
+  .widgets-line__stroke {
+    fill: none;
+    stroke: var(--widgets-accent, var(--theme-success-500));
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+  }
+  .widgets-line__area {
+    fill: var(--widgets-accent, var(--theme-success-500));
+    opacity: 0.12;
+  }
+  .widgets-line__labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    color: var(--widgets-muted, var(--theme-elevation-650));
+    font-size: 11px;
+  }
+  .widgets-chart__value {
+    min-width: 3ch;
+    text-align: right;
+    color: var(--widgets-muted, var(--theme-elevation-650));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  /* buttons side by side, for what a project offers to do */
+  .widgets-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .widgets-quick__item {
+    padding: 8px 14px;
+    background: var(--theme-elevation-50);
+    border: 1px solid var(--widgets-border, var(--theme-border-color));
+    border-radius: 999px;
+    color: var(--widgets-text, var(--theme-text));
+    font: inherit;
+    font-size: var(--widgets-text-size, 14px);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .widgets-quick__item:hover, .widgets-quick__item:focus-visible {
+    background: var(--theme-elevation-100);
+  }
+  .widgets-note p {
+    margin: 0 0 8px;
+    font-size: var(--widgets-text-size, 14px);
+    line-height: 1.5;
+    white-space: pre-line;
+  }
+  .widgets-note a {
+    font-size: var(--widgets-text-size, 14px);
+  }
+}
