@@ -1,98 +1,331 @@
 # payload-plugin-widgets
 
-Dashboard widgets for [Payload](https://payloadcms.com) that read from your collections: figures, lists and charts.
-Anybody signed in can add one to their dashboard and set it up in its drawer; a project can put some there
-ready-made, and show the same three on any other page.
+Dashboard widgets for [Payload](https://payloadcms.com) that read from your collections: **figures, lists and
+charts**. Add the plugin and every collection can be put on the dashboard; whoever is signed in sets a widget up in
+a drawer, a project puts some there ready-made, and the same three can stand on any other page of the admin.
 
-Everything is read with the access of whoever is looking, and nothing is drawn by a script: the tiles are server
-components that follow the admin's theme.
+![A dashboard of figures, charts and a list](./docs/dashboard.png)
 
-Tested with Payload 3.90, Next.js 16 and React 19.
+- **Nothing to declare.** Every collection is a source as its fields describe it: how many there are, a sum for
+  each number, a group for each select, checkbox and relationship, a list of the latest.
+- **Set up by whoever is looking.** "A figure", "A list" and "A chart" are added in the dashboard's edit mode and
+  filtered with the admin's own filter builder.
+- **Or by the config.** `figure(…)`, `list(…)` and `chart(…)` put widgets there ready-made. They are typed against
+  your generated types and checked as the config is built, with a "did you mean" where a name is off.
+- **With whoever's access.** Every read is made as the signed-in user, so access control always applies.
+- **No script draws anything.** The tiles are server components and plain CSS that follow the admin's theme, light
+  and dark. No chart library is shipped to the browser.
+- **Yours to take apart.** Views of your own, the data without the tiles, widgets that are all your own, and a
+  stylesheet made to be overridden.
 
-## 1. Start with nothing
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Setting a widget up on the dashboard](#setting-a-widget-up-on-the-dashboard)
+- [Ready-made widgets](#ready-made-widgets)
+  - [Figures](#figures) · [Lists](#lists) · [Charts](#charts) · [What all three take](#what-all-three-take)
+  - [Filters, periods and moments](#filters-periods-and-moments)
+  - [When something is not there](#when-something-is-not-there)
+- [Sources](#sources)
+  - [What is found by itself](#what-is-found-by-itself) · [Hints on a collection or a field](#hints-on-a-collection-or-a-field) · [Declaring a source](#declaring-a-source)
+- [On any other page](#on-any-other-page)
+- [Drawing it your own way](#drawing-it-your-own-way)
+- [Who sees what](#who-sees-what)
+- [Languages, time and numbers](#languages-time-and-numbers)
+- [Styling](#styling)
+- [Reference](#reference)
+- [Limits](#limits)
+- [Troubleshooting](#troubleshooting)
+- [The demo](#the-demo)
+- [Working on it](#working-on-it)
+- [Licence](#licence)
+
+## Requirements
+
+| | |
+| --- | --- |
+| Payload | 3.90 or later (the modular dashboard) |
+| Next.js | what your Payload supports; developed on 16.3 |
+| React | 19 |
+| Node | 18.20.2, or 20.9 and later |
+| Database | any Payload adapter |
+
+Developed and tested with Payload 3.90.2, Next.js 16.3.8 and React 19.3 on Postgres. Next.js 15 is allowed by the
+peer range as Payload allows it, and has not been tried.
+
+## Install
+
+```sh
+pnpm add payload-plugin-widgets
+```
 
 ```ts
+// payload.config.ts
+import { buildConfig } from 'payload'
 import { widgetsPlugin } from 'payload-plugin-widgets'
 
 export default buildConfig({
+  // …
   plugins: [widgetsPlugin()],
 })
 ```
 
-Then run `payload generate:importmap`.
+Then write the import map again, as after adding any plugin that brings components:
 
-Every collection is now a source as its fields describe it: how many there are, a sum for each number, a group for
-each select, checkbox and relationship, and a list of the latest. In the dashboard's edit mode, "A figure",
-"A list" and "A chart" can be added and set up: which collection, filtered as the admin's lists are, over which
-period, drawn how.
+```sh
+pnpm payload generate:importmap
+```
 
-Put it after the plugins that add collections. It runs with `order: 100`, so plugins that leave their order open
-come first.
+That is all. There is no stylesheet to add and no route to mount: the components bring their styles, and
+everything is read on the server.
 
-## 2. Put widgets there ready-made
+Put the plugin **after the plugins that add collections**. It runs with `order: 100`, so plugins that leave their
+order open come first anyway; a collection that is added later still is named in a warning when Payload starts.
+
+## Quick start
+
+With nothing but `widgetsPlugin()`, open the dashboard, choose **Edit Dashboard** from the menu beside its name,
+and add "A figure", "A list" or "A chart". The pencil on a widget opens its drawer.
+
+To have a dashboard that starts with something on it:
 
 ```ts
 import { chart, figure, list, widgetsPlugin } from 'payload-plugin-widgets'
 
 widgetsPlugin({
+  currency: 'EUR',
+  timeZone: 'Europe/Zagreb',
   sources: { media: false },
   widgets: [
     figure('open-tasks', 'tasks', { label: 'Open tasks', where: { status: { not_equals: 'done' } } }),
     figure('overdue', 'tasks', { label: 'Overdue', where: { dueDate: { less_than: 'today' } } }),
-    figure('average-order', 'orders', { label: 'Average order', measure: { avg: 'total' }, period: 'month' }),
+    figure('sold', 'orders', { label: 'Sold this month', measure: 'total', period: 'month', compare: 'previous' }),
     chart('orders-by-month', 'orders', { label: 'Orders', measure: 'total', by: 'time', period: 'last12', as: 'columns' }),
     list('latest-orders', 'orders', { label: 'Latest orders', limit: 5 }),
   ],
 })
 ```
 
-- `where` is a filter as Payload takes them anywhere, `and` and `or` included.
-- A date can be compared with a **moment** instead of a date that would stand still: `now`, `today`, `tomorrow`,
-  `yesterday`, `startOfWeek`, `startOfMonth`, `startOfYear`, each on its own or moved by days, weeks, months or
-  years (`today+7d`, `startOfMonth-1m`).
-- `period` is one of `all`, `today`, `past`, `upcoming`, `month`, `year`, `last30`, `last12` or `custom` (with
-  `from` and `to`); `date` says which date it goes by where that is not the source's own.
-- `measure` is how many there are where it is left out, a number field by name (its sum), or
-  `{ sum | avg | min | max: 'field' }`.
-- `roles` says who a widget is for, `home` who starts with it on their dashboard.
+The collection slugs, the field names in `where`, `measure`, `by` and `date` are all offered and checked by the
+editor from your `payload-types.ts`.
 
-A widget set up with what is not there says so, and what was probably meant:
+## Setting a widget up on the dashboard
 
-```
-widgetsPlugin: a widget is set up with what is not there
-  - "overdue": tasks has no field called "dueDat". Did you mean "dueDate"?
-```
+![Setting a figure up in its drawer](./docs/setup.gif)
 
-A source, a filter, a measure or a view that is not there stops the config from being built. A field that is not
-there, in a `where`, a `date` or a measure, is only known once Payload has started: it is logged as an error then,
-and the tile says the same in place of its figure.
+Anybody signed in can add the three widgets to their own dashboard and say what each shows. What they pick from is
+what they may read: a source that is not for them is not offered.
 
-The ready-made widgets are what a dashboard starts with and what "Reset layout" goes back to. Payload keeps each
-person's own layout once they rearrange it.
+<img src="./docs/drawer.png" alt="The drawer of a figure" width="520">
 
-## 3. Say more about a figure
+| In the drawer | For | What it says |
+| --- | --- | --- |
+| Title | all | What the tile is called. Empty, it is named after what it shows ("Orders · Sold · Revenue"). |
+| Of what | all | The source: a collection, or one the project declared. |
+| Which ones | all | One of the source's filters, where it declares any. |
+| Only those where | all | Payload's own filter builder, over the collection's fields. On top of "Which ones". |
+| What about them | figure, chart | The measure. Empty is how many there are. |
+| Worked out as | figure, chart | Added up, the average, the lowest or the highest: for a measure that is a number field. |
+| Period | figure, chart | Any time, today, before today, from today on, this month, this year, the last 30 days, the last 12 months, or between two dates. |
+| Going by | figure, chart | Which date the period goes by, where the source has more than one. |
+| From, Until | figure, chart | The two dates of "Between two dates". Either may be left open. |
+| Compared with | figure | The period before. |
+| Goal | figure | What the figure is set against. |
+| Drawn as | all | A number, progress or a sparkline; bars, columns or a line; and any view the project added. |
+| Line under it | figure | What the note says, in place of the usual. |
+| Which list | list | One of the source's lists. |
+| How many rows | list | |
+| Split by | chart | Time, or one of the source's groups. |
+
+A click on a figure or on a bar leads to the collection's list view, filtered to exactly the records it counted.
+
+Payload keeps each person's layout as their own preference. The ready-made widgets are what a dashboard starts with
+and what "Reset Layout" goes back to.
+
+## Ready-made widgets
+
+`widgets` in the options is the dashboard everybody starts with, in the order given: figures first in a row of
+small tiles, then lists and charts side by side, then Payload's own list of collections.
+
+Each is made by a function that takes a **slug** of its own (what Payload keeps it by, and `data-widget` in a
+stylesheet), a **source** (a collection's slug, or a [declared source](#declaring-a-source)), and what it shows.
+
+### Figures
+
+![A figure as a number, as progress and over a sparkline](./docs/figures.png)
 
 ```ts
 figure('sold', 'orders', {
-  label: 'Sold this month', measure: 'total', period: 'month',
-  compare: 'previous',   // also read for the period before
-  goal: 5000,            // what it is set against
-  as: 'progress',        // or 'sparkline', or left out for the number alone
+  label: 'Sold this month',
+  measure: 'total',        // a number field (its sum), or { sum | avg | min | max: 'field' }; left out: how many
+  period: 'month',
+  compare: 'previous',     // also read for the period before
+  goal: 5000,              // what it is set against
+  as: 'progress',          // or 'sparkline'; left out: the number alone
   note: '{change} on last month · {left} to go',
 })
 ```
 
-`compare`, `goal` and `as: 'sparkline'` say what else is read; `as` says how it is drawn; `note` what the line
-under the number says. Without a note the figure says the usual of what it was given ("+12% on the period before
-· 60% of 5.000,00 €").
+| Option | | |
+| --- | --- | --- |
+| `measure` | `string \| { sum \| avg \| min \| max: field, format?, currency? }` | How many there are where it is left out. A number field by name is added up. Of a declared source, one of its measures by name. |
+| `compare` | `'previous'` | Also read for the period before. Needs a period that has a beginning: not `all`, `past` or `upcoming`, and `custom` only with a `from`. |
+| `goal` | `number` | What the figure is set against, in what the measure counts. |
+| `as` | `'number' \| 'progress' \| 'sparkline'` or a view of your own | `progress` draws how far towards the goal it is, and needs one; `sparkline` what it was over the period. |
+| `note` | `string` | The line under the number, in place of the usual one. |
+| `fields`, `data` | `Field[]`, `object` | Settings of the widget's own in its drawer, and what they start as. A measure reads them from `context.data`. |
 
-A note can use `{value}` and `{note}` (what it would have said); with `compare`, `{previous}` and `{change}`; with
-a goal, `{goal}`, `{percent}` and `{left}`.
+Without a `note` a figure says the usual of what it was given: "+12% on the period before · 60% of €5,000.00". A
+note can use:
+
+| | |
+| --- | --- |
+| `{value}` | the figure as it is shown |
+| `{note}` | what the line would have said |
+| `{previous}`, `{change}` | with `compare`: what it was then, and by how much it changed ("+12%") |
+| `{goal}`, `{percent}`, `{left}` | with a goal: the goal, how much of it this is, and how much is missing |
 
 A month or a year to date is compared with the same days of the one before; any other period with the one that is
 as long and ends where it starts.
 
-## 4. Let a collection describe itself
+### Lists
+
+```ts
+list('latest-orders', 'orders', { label: 'Latest orders', limit: 5 })
+list('my-tasks', tasks, { label: 'My tasks', list: 'mine', filter: 'open' })
+```
+
+| Option | | |
+| --- | --- | --- |
+| `list` | `string` | One of the source's lists. Of a collection by its slug there is one, `latest`, and it can be left out. |
+| `limit` | `number` | How many rows. |
+| `filter`, `where` | | As below. A list has no period. |
+| `as` | a view of your own | A list is drawn as rows unless a [view](#a-view) draws it otherwise. |
+
+Every row leads to its document; the head of the tile to the whole list. A declared list can say which rows are
+late, offer a link to a new document and a box that adds one by its title.
+
+### Charts
+
+![The same chart as bars, as columns and as a line](./docs/charts.png)
+
+```ts
+chart('revenue-by-month', 'orders', { label: 'Revenue by month', measure: 'total', by: 'time', period: 'last12', as: 'columns' })
+chart('orders-by-status', 'orders', { label: 'Orders by status', by: 'status', period: 'year' })
+```
+
+| Option | | |
+| --- | --- | --- |
+| `measure` | as of a figure | What is drawn. How many there are where it is left out. |
+| `by` | `'time'` or a group | Over time, or split by a select, a checkbox or a relationship of the collection. A select gives the labels of its options, a relationship the titles of what it points at. |
+| `as` | `'bars' \| 'columns' \| 'line'` or a view of your own | Bars one to a row where it is left out. |
+
+Over time, a chart is drawn by day up to two months and by month beyond. Each bar leads to the records it is made of.
+
+### What all three take
+
+| Option | | |
+| --- | --- | --- |
+| `label` | `string` | Required. In English; [`i18n`](#languages-time-and-numbers) says it in the admin's other languages. |
+| `filter` | `string` | One of a declared source's filters. |
+| `where` | `Where` | Which records, as Payload filters them anywhere. On top of `filter`. |
+| `period` | see below | Which records by date. Figures and charts. |
+| `date` | field name | The date the period goes by; the source's own where it is left out. |
+| `from`, `to` | `'YYYY-MM-DD'` | The first and the last day of `period: 'custom'`. Either may be left out. |
+| `roles` | `string[]` | Who the widget is for. Whoever its source is for where it is left out. |
+| `home` | `string[]` | Who *starts with it* on their dashboard, where that is fewer than `roles`. `[]` is nobody: it is then only there to be added. |
+| `action` | `{ label, href }` | A link of your own in the head of the tile. |
+| `after` | component path | Something of your own drawn under what the widget shows (`'src/components/Hint.tsx#Hint'`). It is handed `req`, `widgetSlug` and `widgetData`. |
+
+### Filters, periods and moments
+
+`where` is a filter as Payload takes them anywhere, `and` and `or` included:
+
+```ts
+where: { or: [{ status: { equals: 'paid' } }, { and: [{ status: { equals: 'shipped' } }, { total: { greater_than: 100 } }] }] }
+```
+
+A date can be compared with a **moment** in place of a date that would stand still, so "due before today" is still
+true tomorrow:
+
+```ts
+where: { dueDate: { less_than: 'today' } }                        // overdue
+where: { createdAt: { greater_than_equal: 'startOfMonth-1m' } }   // since the start of last month
+where: { dueDate: { less_than: 'now+7d' } }                       // due within a week
+```
+
+| Moment | |
+| --- | --- |
+| `now` | this instant |
+| `today`, `tomorrow`, `yesterday` | the start of that day |
+| `startOfWeek`, `startOfMonth`, `startOfYear` | the start of the one that is now |
+| any of them `+` or `-` a count and `d`, `w`, `m` or `y` | moved by days, weeks, months or years: `today+7d`, `startOfYear-1y` |
+
+A day starts where the `timeZone` option says, a week on the day `weekStartsOn` says.
+
+| `period` | |
+| --- | --- |
+| `all` | any time (the default) |
+| `today` | |
+| `past` | before today |
+| `upcoming` | from today on |
+| `month`, `year` | this month or this year, to date |
+| `last30`, `last12` | the last 30 days, the last 12 months |
+| `custom` | between `from` and `to` |
+
+### When something is not there
+
+![Tiles that say what they were set up with is not there](./docs/notices.png)
+
+A source, a filter, a measure or a view that is not there **stops the config from being built**, and says what was
+probably meant:
+
+```
+widgetsPlugin: a widget is set up with what is not there
+  - "by-status": orders has no group called "stauts". Did you mean "status"?
+```
+
+A field that is not there, in a `where`, a `date` or a measure, is only known once Payload has settled the
+collections: it is logged as an error when Payload starts, and the tile says the same in place of its figure. So
+does a widget somebody set up themselves after the config changed under it. Nothing else on the page breaks.
+
+Most of this never gets that far: with `payload-types.ts` generated, a misspelt name does not compile.
+
+## Sources
+
+A **source** is a collection as the widgets see it: which of its records are worth looking at (filters), what can
+be told about a set of them (measures), short lists, and what it can be split by (groups).
+
+```ts
+widgetsPlugin({
+  sources: {
+    media: false,         // not a source
+    'audit-log': false,
+    invoices,             // declared, see below
+  },
+  discover: false,        // only the declared ones; every collection where it is left out
+})
+```
+
+### What is found by itself
+
+From a collection's fields alone, the plugin makes:
+
+| From | Comes |
+| --- | --- |
+| the collection | a measure of how many there are (`count`), and a list of the latest |
+| each `number` field that holds one number | a measure that can be added up, averaged, or its lowest or highest taken |
+| each `select`, `radio` and `checkbox`, and each `relationship` and `upload` to one collection | a group a chart can be split by |
+| each `relationship` and `upload` to one collection | a scope: how to narrow it to one of what it points at |
+| each `date` field, `createdAt` and `updatedAt` | a date a period can go by; `createdAt` unless said otherwise |
+| the collection's labels and `useAsTitle` | what it and its rows are called |
+
+Fields inside rows, collapsibles, unnamed tabs and unnamed groups are seen through. Virtual fields and fields the
+admin hides are left out. A collection that keeps drafts is read as the admin lists it: the latest version of each.
+
+### Hints on a collection or a field
 
 Under `custom.widgets`, a collection or a field says what it is to the widgets:
 
@@ -102,33 +335,48 @@ Under `custom.widgets`, a collection or a field says what it is to the widgets:
   custom: { widgets: { label: 'Orders', date: 'placedAt', roles: ['admin'] } },
   fields: [
     { name: 'total', type: 'number', custom: { widgets: { format: 'money', currency: 'currency' } } },
+    { name: 'estimate', type: 'number', custom: { widgets: { format: 'hours' } } },
     { name: 'internalScore', type: 'number', custom: { widgets: false } },
   ],
 }
 ```
 
-`custom: { widgets: false }` on a collection keeps it from being a source at all. A number's `format` is
-`number`, `money` or `hours`; **hours are kept in minutes**.
+| On a collection | |
+| --- | --- |
+| `false` | not a source at all (`sources: { slug: true }` in the options brings it back) |
+| `label` | what it is called, where that is not the collection's own label |
+| `date` | the date its periods go by |
+| `roles` | who has a use for it, where that is fewer than may read it |
 
-## 5. Declare what cannot be found
+| On a field | |
+| --- | --- |
+| `false` | left out |
+| `format` | `'number'`, `'money'` or `'hours'`. **Hours are kept in minutes.** |
+| `currency` | where it is money: the name of the field that holds a record's currency |
 
-A source says what else of a collection is worth looking at. The names a widget picks from it are part of its
-type, so one that is not there does not compile.
+### Declaring a source
+
+What cannot be found is declared. The names a widget picks from a declared source are part of its type, so one
+that is not there does not compile.
 
 ```ts
-import { source } from 'payload-plugin-widgets'
+import { chart, figure, source, widgetsPlugin } from 'payload-plugin-widgets'
 
 const invoices = source('invoices', {
-  label: 'Invoices', roles: ['admin'], date: 'issuedAt',
+  label: 'Invoices',
+  roles: ['admin'],
+  date: 'issuedAt',
   filters: {
     unpaid: { where: { paid: { equals: false } } },
-    overdue: { where: { dueDate: { less_than: 'today' } } },
+    overdue: { label: 'Overdue', where: { and: [{ paid: { equals: false } }, { dueDate: { less_than: 'today' } }] } },
+    mine: { where: ({ as }) => ({ owner: { equals: as.user.id } }) },
   },
   measures: {
-    total: { sum: 'total', format: 'money' },
-    average: { avg: 'total', format: 'money' },
+    total: { sum: 'total', format: 'money', currency: 'currency' },
+    average: { avg: 'total', format: 'money', label: 'Average invoice' },
   },
-  groups: { client: 'Client' },
+  groups: { client: 'Client', status: 'Status' },
+  scopes: { client: id => ({ client: { equals: id } }) },
 })
 
 widgetsPlugin({
@@ -140,27 +388,111 @@ widgetsPlugin({
 })
 ```
 
-What the plugin finds in the collection by itself is still added to a declared source, unless it says
-`discover: false`. `widgetsPlugin({ discover: false })` keeps to the declared sources altogether.
+| | |
+| --- | --- |
+| `label` | The collection's own where it is left out. |
+| `roles` | Who has a use for it. Whoever the collection lets read it where it is left out. |
+| `date` | The date a period and a chart over time go by. |
+| `discover` | `false` to have only what is declared here. Otherwise what the plugin finds is there too. |
+| `draft` | The collection keeps drafts: read the latest version of each. |
+| `filters` | Each a `where`, or a function of the [context](#the-context) that gives one, for filters that depend on who is looking. Named after its key where it has no `label`. A `remark` says what is worth saying under the number of them. |
+| `measures` | In place, `{ sum \| avg \| min \| max: 'field', format?, currency?, label?, filter? }`; or one written out (below). `count` is always there. |
+| `lists` | Made with `rows(…)` (below). |
+| `groups` | The fields it can be split by, each with what to call it. |
+| `scopes` | How to narrow it to one of something, by what that is called: `<Chart scope={{ client: id }} />`. |
 
-## 6. Show them on any page
+A declared source is kept by the name it is given under `sources`. Renaming it leaves the widgets people set up
+with it saying they are not set up.
+
+**A measure written out** is for what a sum of one field does not say:
+
+```ts
+import { records, sum } from 'payload-plugin-widgets'
+
+measures: {
+  // a field added up, with what its records are called
+  worked: sum('Hours worked', 'minutes', 'hours', { note: ['entry', 'entries'] }),
+  // a record that does not simply count as its field
+  billable: sum('Billable', 'minutes', 'money', { select: ['rate'], of: doc => (doc.minutes / 60) * (doc.rate ?? 0) }),
+  // anything at all: `read` is handed the context, the selection and the source
+  oldest: {
+    label: 'Oldest open',
+    read: async (context, selection, from) => {
+      const [first] = await records(context, from, selection, ['createdAt'], { limit: 1, sort: 'createdAt' })
+      return first ? { value: context.day(context.date(first.createdAt)) } : { value: '–' }
+    },
+  },
+}
+```
+
+A measure gives a `Reading`: `value` as it is shown, and optionally `note`, `tone` (`'calm' | 'warn' | 'bad'`),
+`href`, and `amount`, the figure as a number, which lets it be compared and set against a goal. One made with
+`sum`, or with `reckoned` (what `sum` is made of), can also be drawn as a chart.
+
+**A list:**
+
+```ts
+import { rows } from 'payload-plugin-widgets'
+
+lists: {
+  upcoming: rows('Upcoming', {
+    select: ['title', 'dueDate'],
+    sort: 'dueDate',
+    row: (doc, context) => ({
+      title: doc.title,
+      detail: doc.dueDate ? context.day(context.date(doc.dueDate)) : '',
+      late: !!doc.dueDate && context.date(doc.dueDate) < context.today,
+    }),
+    empty: 'Nothing coming up',
+    more: context => ({ add: { href: `${context.list('tasks')}/create`, label: 'New task' } }),
+  }),
+}
+```
+
+`doc` in `row` has the fields named in `select`, typed, and no others.
+
+## On any other page
+
+The same three are server components for any page of the admin: a custom view, a field, a tab of a document.
 
 ```tsx
 import { Chart, Figure, Records } from 'payload-plugin-widgets/rsc'
 
-<Figure req={req} source="orders" measure="total" period="month" compare="previous" />
-<Chart req={req} source={time} measure="worked" by="user" scope={{ project: id }} as="line" />
-<Records req={req} source="tasks" where={{ assignee: { equals: req.user.id } }} quiet />
+export const ProjectSummary = async ({ req, id }) => (
+  <>
+    <Figure req={req} source="orders" measure="total" period="month" compare="previous" />
+    <Chart req={req} source={time} measure="worked" by="user" scope={{ project: id }} as="line" />
+    <Records req={req} source="tasks" where={{ assignee: { equals: req.user.id } }} quiet />
+  </>
+)
 ```
 
-`req` says who is looking. `scope` narrows a declared source to one of something, as its `scopes` call it.
-`quiet` leaves no trace where there is nothing to show or the person may not see it; otherwise a tile says why.
+| Prop | | |
+| --- | --- | --- |
+| `req` | `PayloadRequest` | Who is looking. Required. |
+| `source` | a declared source, or a name | Required. |
+| `filter`, `where`, `period`, `date`, `from`, `to` | | As of a ready-made widget. |
+| `scope` | `{ [name]: id }` | Only what belongs to one of something, as the source's `scopes` call it. |
+| `label` | `string` | What the tile is called; named after what it shows where it is left out. |
+| `name` | `string` | What it is found by in a stylesheet, as `data-widget`. |
+| `as` | `string` | How it is drawn. |
+| `quiet` | `boolean` | Leaves no trace where there is nothing to show or the person may not see it. Otherwise a tile says why. |
+| `action` | `{ label, href }` | A link in the head of the tile. |
+| `after` | `ReactNode` | Anything at all under what it shows. |
+| `measure`, `compare`, `goal`, `note`, `data` | | `Figure` |
+| `list`, `limit` | | `Records` |
+| `measure`, `by` | | `Chart` |
 
-## 7. Draw it your own way
+Nobody signed in: nothing is drawn.
 
-Three steps, each further from the tiles:
+## Drawing it your own way
 
-**A view**, for one of the three kinds. It is offered under "Drawn as" in the drawer, and asked for with `as`:
+Three steps, each further from the tiles.
+
+### A view
+
+A component of your own for one of the three kinds. It is offered under "Drawn as" in the drawer, and asked for
+with `as`:
 
 ```ts
 widgetsPlugin({
@@ -172,92 +504,253 @@ widgetsPlugin({
 ```tsx
 import type { ChartViewProps } from 'payload-plugin-widgets/rsc'
 
-export const Donut = ({ label, bars, href }: ChartViewProps) => …
+export const Donut = ({ label, note, bars, href }: ChartViewProps) => (
+  <section className="widgets-tile widgets-tile--plain">
+    <span className="widgets-tile__label">{label}</span>
+    {/* bars: { label, amount, shown, href? }[] */}
+  </section>
+)
 ```
 
-The component is handed what the tile would be made of (`FigureViewProps`, `ListViewProps`, `ChartViewProps`),
-with `req` and the name it was asked for by.
+It is handed what the tile would be made of, with `req`, `view` (the name it was asked for by), `action`, `after`
+and `name`:
 
-**The data alone**, to draw anything anywhere:
+| | |
+| --- | --- |
+| `FigureViewProps` | `label, value, note, tone, href, trend, previous, goal { value, amount, share }, series [{ label, amount, shown }]` |
+| `ListViewProps` | `label, note, tone, href, rows [{ title, detail, href, late }], empty, add, quick, api, words` |
+| `ChartViewProps` | `label, note, href, empty, bars [{ label, amount, shown, href }]` |
+
+Run `payload generate:importmap` after adding one.
+
+### The data alone
+
+To draw anything anywhere: a page, a component, an endpoint.
 
 ```ts
-import { readChart, readFigure, readList } from 'payload-plugin-widgets'
+import { readChart, readFigure, readList, Unavailable } from 'payload-plugin-widgets'
 
-const { value, note, tone, href, previous, trend } = await readFigure(req, 'orders', { measure: 'total', period: 'month', compare: 'previous' })
+const sold = await readFigure(req, 'orders', { measure: 'total', period: 'month', compare: 'previous', goal: 5000 })
+// { value: '€2,445.63', amount: 2445.63, note: '+34% on the period before · 49% of €5,000.00', href: '/admin/collections/orders?…',
+//   previous: { value: '€1,825.10', amount: 1825.1 }, trend: 'up', goal: { value: '€5,000.00', amount: 5000, share: 0.49 } }
+
+const { rows, note, href } = await readList(req, 'tasks', { limit: 5 })
+const { bars, note: total } = await readChart(req, invoices, { measure: 'total', by: 'client', scope: { client: 12 } })
 ```
 
-**A widget that is all your own**, given a place in the starting layout, a label in every language and its roles
-like the rest:
+They take what the components take, read as whoever makes the request and in their language. Where the source is
+not for them, or nobody is signed in, `Unavailable` is thrown; where what is picked is not there, `Misconfigured`,
+with what is wrong as `problems`.
+
+### A widget that is all your own
+
+Any server component, given a place in the starting layout, a label in every language and its roles like the rest:
 
 ```ts
-widget('shortcuts', { label: 'Shortcuts', Component: 'src/components/Shortcuts.tsx#Shortcuts', roles: ['admin'] })
+import { widget } from 'payload-plugin-widgets'
+
+widget('shortcuts', { label: 'Shortcuts', Component: 'src/components/Shortcuts.tsx#Shortcuts', roles: ['admin'], size: 'wide' })
 ```
 
 ```tsx
 import { gated, NoteTile } from 'payload-plugin-widgets/rsc'
 
-export const Shortcuts = gated(async ({ req }) => <NoteTile label="Shortcuts" text="…" />)
+export const Shortcuts = gated(async ({ req, widgetData }) => (
+  <NoteTile label="Shortcuts" text="Everything you need is one click away." link={{ href: '/admin/collections/orders', label: 'Orders' }} />
+))
 ```
 
-A ready-made widget also takes a link for its head (`action`) and a component drawn under what it shows (`after`).
+`gated` keeps it to its roles. `size` is `'tile'` (as small as a figure) or `'wide'`; `fields` and `data` give it
+settings of its own, read from `widgetData`.
 
-## 8. Who sees what
+The tiles themselves are exported too, to draw your own data the way the plugin draws its own: `Tile`, `ListTile`,
+`ChartTile`, `NoteTile` and `Notice`.
 
-Every read is made as the signed-in user, so Payload's access control always applies. On top of it, `roles` on a
-source or a widget says who has a use for it. The plugin expects a `roles` field on the user holding some of them;
-where yours is kept another way, say how:
+## Who sees what
+
+Every read is made as the signed-in user (`overrideAccess: false`), so **Payload's access control always
+applies**: a figure counts only what that person may read.
+
+On top of it, `roles` on a source or a widget says who has a *use* for it: who is offered it, and who starts with
+it. The plugin expects a `roles` field on the user holding some of them. Where yours is kept another way, say how:
 
 ```ts
 widgetsPlugin({ allowed: (roles, user) => roles.includes(user?.role) })
 ```
 
-A source without roles is for whoever the collection lets read it.
+- A source without roles is for whoever the collection lets read it.
+- A widget without roles is for whoever its source is for.
+- A widget somebody may not see says "Not part of your role" in place of its figure, or nothing where it is `quiet`.
 
-## 9. Languages, time and numbers
+## Languages, time and numbers
 
 ```ts
 widgetsPlugin({
   timeZone: 'Europe/Zagreb',   // where a day starts and ends; UTC where it is left out
-  weekStartsOn: 1,             // Monday, the default
-  currency: 'EUR',             // of amounts that do not say theirs
-  format: (value, { style, currency }) => style === 'money' ? `${value.toFixed(2)} ${currency}` : undefined,
+  weekStartsOn: 1,             // Monday, the default; 0 is Sunday
+  currency: 'EUR',             // of amounts that do not say theirs, and the one charts are drawn in
+  format: (value, { style, currency }) => (style === 'money' ? `${value.toFixed(2)} ${currency}` : undefined),
   i18n: {
-    translations: { de: { 'Today': 'Heute', 'by {what}': 'nach {what}' } },
+    translations: { de: { 'Today': 'Heute', 'by {what}': 'nach {what}', 'Open tasks': 'Offene Aufgaben' } },
     plurals: { de: { record: { one: 'Eintrag', other: 'Einträge' } } },
+    locale: language => (language === 'de' ? 'de-AT' : language),
   },
 })
 ```
 
-Everything is written in English. `STRINGS` is the full list of what the widgets say, to translate; what you
-write yourself (the label of a source, of a widget) is said through the same dictionary. A project with a
-dictionary of its own gives `i18n.translate` and `i18n.plural` instead.
+Everything is written in English and said in the language of the request. Numbers, amounts, hours and dates are
+written by `Intl` in that language; `format` is only for where that is not how you write them, and whatever it
+returns nothing for is written as usual.
 
-## 10. Styling
+- `STRINGS` is the full list of what the widgets say, to translate; `PLURALS` what they count.
+- What you write yourself (the label of a source, of a widget, of a filter) is said through the same dictionary.
+  A label can also be given in several languages at once, as Payload's own are: `{ en: 'Orders', de: 'Bestellungen' }`.
+- `plurals` are by language under what the thing is called for one in English, in the forms `Intl.PluralRules`
+  names: `{ hr: { record: { one: 'zapis', few: 'zapisa', other: 'zapisa' } } }`.
+- A project with a dictionary of its own gives `i18n.translate(language, text, vars)` and
+  `i18n.plural(language, count, one, many)` instead.
 
-The tiles bring their own stylesheet, in a cascade layer of its own, so anything a project writes wins without
-`!important`. It can change:
+## Styling
 
-- **variables**, each falling back to the admin's own: `--widgets-accent`, `--widgets-radius`,
-  `--widgets-chart-height` and the rest;
-- **classes** that keep their names: `.widgets-tile` with `__label`, `__value`, `__note`, `.widgets-chart`,
-  `.widgets-columns`, `.widgets-line`;
-- **attributes** each tile says of itself: `data-kind`, `data-tone`, `data-view`, `data-trend`, and `data-widget`
-  with the slug of a ready-made one.
+![The same dashboard in the admin's dark theme](./docs/dashboard-dark.png)
+
+The tiles follow the admin's theme by themselves. Their stylesheet is in a cascade layer of its own (`widgets`),
+so **anything a project writes wins without `!important`**, whatever its selector.
 
 ```css
-:root { --widgets-accent: var(--theme-warning-500); }
+/* in your admin stylesheet, e.g. src/app/(payload)/custom.scss */
+:root { --widgets-accent: var(--theme-warning-500); --widgets-radius: 0; }
 [data-widget='overdue'] .widgets-tile__value { color: var(--theme-error-500); }
 [data-trend='down'] .widgets-tile__note { color: var(--theme-error-500); }
+.widgets-tile[data-tone='bad'] { --widgets-border: var(--theme-error-500); }
 ```
 
-The full list is at the top of [`src/widgets.css`](./src/widgets.css).
+**Variables**, each falling back to the admin's own:
+
+| | |
+| --- | --- |
+| `--widgets-accent` | the dot of a tile that is doing fine, and a chart's bars |
+| `--widgets-warn`, `--widgets-bad` | the dot of one that wants attention, and of one that is late |
+| `--widgets-link` | the links of a tile |
+| `--widgets-bg`, `--widgets-bg-hover` | a tile's background |
+| `--widgets-border`, `--widgets-border-hover` | its border |
+| `--widgets-radius`, `--widgets-padding` | its corners, and the room inside it |
+| `--widgets-text`, `--widgets-muted`, `--widgets-label` | what it says, what it says under that, and what it is called |
+| `--widgets-label-size`, `--widgets-value-size`, `--widgets-text-size`, `--widgets-note-size` | |
+| `--widgets-chart-height`, `--widgets-spark-height` | how tall columns and a line are drawn, and the line under a figure |
+
+**Classes**, which keep their names:
+
+| | |
+| --- | --- |
+| `.widgets-tile` | with `__label`, `__value`, `__progress`, `__note`, `__head`, `__rows`, `__late`, `__action`, `__add` |
+| `.widgets-chart` | with `__label`, `__bar`, `__value` |
+| `.widgets-columns` | with `__bar`, `__label` |
+| `.widgets-line` | with `__stroke`, `__area`, `__labels` |
+| `.widgets-quick`, `.widgets-note` | |
+
+**Attributes** each tile says of itself:
+
+| | |
+| --- | --- |
+| `data-kind` | `figure`, `list`, `chart`, `notice`, `note` |
+| `data-tone` | `calm`, `warn`, `bad` |
+| `data-view` | `number`, `progress`, `sparkline`; `bars`, `columns`, `line` |
+| `data-trend` | on a figure that is compared: `up`, `down`, `flat` |
+| `data-widget` | the slug of a ready-made widget, or the `name` a component was given |
+
+The stylesheet is also there by itself, as `payload-plugin-widgets/widgets.css`, for a page that draws the classes
+without the components.
+
+## Reference
+
+### Options
+
+```ts
+widgetsPlugin({
+  sources,       // { [name]: source(…) | boolean }
+  discover,      // false: only the declared sources
+  widgets,       // figure(…), list(…), chart(…), widget(…)
+  views,         // { [name]: { kind: 'figure' | 'list' | 'chart', label, Component } }
+  allowed,       // (roles, user) => boolean
+  i18n,          // { translations, plurals, translate, plural, locale }
+  timeZone,      // 'UTC'
+  weekStartsOn,  // 1
+  currency,      // 'EUR'
+  format,        // (value, { style, locale, currency }) => string | undefined
+})
+```
+
+An `admin.dashboard.defaultLayout` of the project's own is left as it is; the ready-made widgets are then there to
+be added.
+
+### Entries
+
+| | |
+| --- | --- |
+| `payload-plugin-widgets` | For the Payload config, and anything else on the server: `widgetsPlugin`, `figure`, `list`, `chart`, `widget`, `source`, `count`, `sum`, `reckoned`, `rows`, `records`, `any`, `selected`, `readFigure`, `readList`, `readChart`, `Unavailable`, `Misconfigured`, `STRINGS`, `PLURALS`, `PERIODS`, `VIEWS`, and the types. It imports no component. |
+| `payload-plugin-widgets/rsc` | Server components: `Figure`, `Records`, `Chart`, `gated`, `contextFor`, the tiles, and `FigureViewProps`, `ListViewProps`, `ChartViewProps`. |
+| `payload-plugin-widgets/client` | The client components the drawer and the tiles use. The import map points at them; there is seldom a reason to import one. |
+| `payload-plugin-widgets/widgets.css` | The stylesheet. |
+
+### The context
+
+What a filter's function, a measure's `read` and a list's `row` are handed:
+
+| | |
+| --- | --- |
+| `payload` | |
+| `as` | `{ depth: 0, overrideAccess: false, user }`: spread it into a read to make it as the signed-in user |
+| `sources`, `mayRead(source)` | every source by name, and whether the person looking has a use for one |
+| `today`, `dayStart`, `monthStart`, `yearStart` | today as `YYYY-MM-DD`, and the instants those start at, in the time zone given |
+| `date(instant)`, `instant(day)` | the day an instant falls on there, and the instant a day starts at |
+| `currency`, `weekStartsOn` | as the options have them |
+| `data` | what the widget was set up with |
+| `list(slug, where?)`, `edit(slug, id)` | links into the admin |
+| `t(text, vars?)`, `plural(count, one, many)` | in the language of the request |
+| `number`, `hours(minutes)`, `money(amount, currency)`, `total(perCurrency)`, `day(date)`, `month(date)` | written as that language writes them |
 
 ## Limits
 
-- A sum or a chart reads at most 5,000 records and works them out in memory. Beyond that the tile says
-  "Only the first 5.000 are counted": narrow it with a period or a filter. Counts have no such limit.
-- A chart of money is drawn in one currency; records in another are left out, and the tile says how many.
-- A list can be drawn another way only by a view of the project's own.
+- **A sum or a chart reads at most 5,000 records** and works them out in memory, so it is the same on every
+  database. Beyond that the tile says "Only the first 5,000 are counted": narrow it with a period or a filter.
+  Counts have no such limit.
+- A chart of money is drawn in one currency, the one the plugin was given; records in another are left out, and
+  the tile says how many. A figure of money says each currency's total.
+- A list is drawn as rows; another way only by a view of your own.
+- Groups, measures and dates are a collection's own top-level fields: nothing inside a named group, an array or a
+  block is found. A relationship to more than one collection is not a group.
+- There is no caching: a tile is read when the page is.
+
+## Troubleshooting
+
+| What you see | Why |
+| --- | --- |
+| `widgetsPlugin: a widget is set up with what is not there` when the config is built | A ready-made widget names a source, filter, measure, group, list or view that is not there. The message says which, and what was probably meant. |
+| The same in the log when Payload starts, and in a tile | A field in a `where`, a `date` or a measure is not in the collection. |
+| `… was added to the config after the widgets were set up, and is no source` | A plugin that adds a collection runs after this one. Give it an `order` below 100, or list this plugin last. |
+| A widget is missing, or its component is not found | The import map is old: `payload generate:importmap`. |
+| "Not part of your role" | The widget's or its source's `roles` do not include any of the user's. See [`allowed`](#who-sees-what) where roles are kept another way. |
+| "Not available to this account" | The collection's own access control refuses the read. |
+| "Only the first 5,000 are counted" | See [Limits](#limits). |
+| A figure is one day off around midnight | Set `timeZone`: a day starts in UTC where it is left out. |
+| Hours are sixty times too many | A field with `format: 'hours'` is expected to hold minutes. |
+| `The widgets plugin is not in the Payload config` | A component from `/rsc` is used in an admin whose config does not have `widgetsPlugin()`. |
+| Somebody still has the old layout after `widgets` changed | Payload keeps their own once they rearrange it. "Reset Layout" in the dashboard's menu goes back to the ready-made one. |
+
+## The demo
+
+[`dev/`](./dev) is a small shop in a stock Payload admin, with made-up data, that every screenshot here is taken
+of. It reads the plugin from its source, so it is also where to work on it:
+
+```sh
+git clone https://github.com/m-grgic/payload-plugin-widgets.git
+cd payload-plugin-widgets
+pnpm install
+DATABASE_URI=postgres://postgres:postgres@127.0.0.1:5432/widgets_demo pnpm dev
+```
+
+See [`dev/README.md`](./dev/README.md).
 
 ## Working on it
 
@@ -265,7 +758,17 @@ The full list is at the top of [`src/widgets.css`](./src/widgets.css).
 pnpm typecheck   # the source, strictly
 pnpm test        # node --test, no database needed
 pnpm build       # dist: JavaScript, types and the stylesheet
+pnpm dev         # the demo
 ```
 
-The source imports its own files without an extension; the build says them in full, so what is published is read
-by Node as it is. Nothing the Payload config reads (`src/index.ts` and what it imports) may import a component.
+- The source imports its own files without an extension; the build says them in full, so what is published is
+  read by Node as it is.
+- Nothing the Payload config reads (`src/index.ts` and what it imports) may import a component.
+- Everything a tile says is in `src/strings.ts`; a test fails where one is said that is not listed there.
+- Publish with `pnpm publish`: it is pnpm that points the package's entries at `dist` (`publishConfig`).
+
+Issues and pull requests are welcome. See the [changelog](./CHANGELOG.md) for what changed.
+
+## Licence
+
+[MIT](./LICENSE) © Matija Grgić

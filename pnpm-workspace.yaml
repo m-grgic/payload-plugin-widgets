@@ -1,0 +1,6 @@
+# pnpm 11 does not finish an install while dependency build scripts are undecided.
+# Neither is needed: the binaries come prebuilt, as optional dependencies.
+allowBuilds:
+  esbuild: false
+  sharp: false
+  unrs-resolver: false
