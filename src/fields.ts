@@ -168,6 +168,12 @@ export const setUp = (settings: Settings): Widget[] => {
           options: [{ label: 'Over time', value: 'time' }, ...choices(source => (source.groups ?? {}) as Record<string, Label>)],
           filterOptions: ofSource as never,
         },
+        {
+          name: 'series', type: 'select', label: 'A series for each',
+          options: choices(source => (source.groups ?? {}) as Record<string, Label>),
+          filterOptions: ofSource as never,
+          admin: { condition: has(source => source.groups, 1), description: 'Leave empty for one.' },
+        },
         ...drawn('chart'), period, ...dates,
       ],
     },

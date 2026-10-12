@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { closest, figureProblems, inWords, viewProblems, viewsOf } from '../src/check'
+import { closest, figureProblems, inWords, seriesProblems, viewProblems, viewsOf } from '../src/check'
 import { combined } from '../src/types'
 
 test('a name that is nearly right is offered', () => {
@@ -27,6 +27,14 @@ test('progress needs a goal, and a comparison a period that has a beginning', ()
   for (const pick of [{ compare: 'previous' }, { compare: 'previous', period: 'all' }, { compare: 'previous', period: 'past' }, { compare: 'previous', period: 'custom' }]) {
     assert.equal(figureProblems(pick).length, 1, JSON.stringify(pick))
   }
+})
+
+test('a chart has a series for each measure or for each of a group, and not the group it is already split by', () => {
+  assert.deepEqual(seriesProblems({ measure: ['revenue', 'count'], by: 'time' }), [])
+  assert.deepEqual(seriesProblems({ measure: 'revenue', by: 'time', series: 'status' }), [])
+  assert.deepEqual(seriesProblems({ measure: ['revenue'], by: 'time', series: 'status' }), [])
+  assert.equal(inWords(seriesProblems({ measure: ['revenue', 'count'], by: 'time', series: 'status' })[0]), 'A chart tells apart its measures or what is in a field, not both.')
+  assert.equal(inWords(seriesProblems({ by: 'status', series: 'status' })[0]), 'A chart cannot be split by "status" twice.')
 })
 
 test('numbers are combined the way a measure says', () => {

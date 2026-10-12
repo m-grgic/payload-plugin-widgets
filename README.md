@@ -219,11 +219,26 @@ chart('orders-by-status', 'orders', { label: 'Orders by status', by: 'status', p
 
 | Option | | |
 | --- | --- | --- |
-| `measure` | as of a figure | What is drawn. How many there are where it is left out. |
+| `measure` | as of a figure, or several | What is drawn. How many there are where it is left out. Several are a series each: `['revenue', 'count']`. |
 | `by` | `'time'` or a group | Over time, or split by a select, a checkbox or a relationship of the collection. A select gives the labels of its options, a relationship the titles of what it points at. |
+| `series` | a group | A series for each of what is in another field: every bar told apart by it. The five there is most of, and the rest as one. |
 | `as` | `'bars' \| 'columns' \| 'line'` or a view of your own | Bars one to a row where it is left out. |
 
 Over time, a chart is drawn by day up to two months and by month beyond. Each bar leads to the records it is made of.
+
+**Several series.** A chart tells apart either what is in a second field or several measures, each in a colour
+of its own (`--widgets-series-1` to `-6`) and named above it with what it comes to:
+
+![Columns stacked by status, and two measures as two lines](./docs/series.png)
+
+```ts
+chart('revenue-by-status', 'orders', { label: 'Orders by month and status', measure: 'total', by: 'time', series: 'status', period: 'last12', as: 'columns' })
+chart('revenue-and-orders', 'orders', { label: 'Revenue and orders', measure: ['total', 'count'], by: 'time', period: 'last12', as: 'line' })
+```
+
+What adds up is stacked: the series of a field, where the measure is a sum or a count. Anything else stands side
+by side: an average of each, or measures of different kinds, which are each drawn against their own highest so
+that euros and a count can share a chart.
 
 ### What all three take
 
@@ -483,7 +498,7 @@ export const ProjectSummary = async ({ req, id }) => (
 | `after` | `ReactNode` | Anything at all under what it shows. |
 | `measure`, `compare`, `goal`, `note`, `data` | | `Figure` |
 | `list`, `limit` | | `Records` |
-| `measure`, `by` | | `Chart` |
+| `measure`, `by`, `series` | | `Chart` |
 
 Nobody signed in: nothing is drawn.
 
@@ -521,9 +536,56 @@ and `name`:
 | --- | --- |
 | `FigureViewProps` | `label, value, note, tone, href, trend, previous, goal { value, amount, share }, series [{ label, amount, shown }]` |
 | `ListViewProps` | `label, note, tone, href, rows [{ title, detail, href, late }], empty, add, quick, api, words` |
-| `ChartViewProps` | `label, note, href, empty, bars [{ label, amount, shown, href }]` |
+| `ChartViewProps` | `label, note, href, empty, bars [{ label, amount, shown, href }]`, and where there are several: `series [{ key, label, total, peak, bars }], stacked` |
 
 Run `payload generate:importmap` after adding one.
+
+**A view may be a client component.** All it is handed is plain data, so `'use client'` at the top is enough for
+one that reacts to the pointer, or that draws with a library made for the browser. `req` is given to a server
+component only, so a client one leaves it out of its props: `Omit<ChartViewProps, 'req'>`.
+
+**With a chart library.** Recharts here; any other goes the same way. `bars` is one row for each bar, and
+`series` (where the chart has several) has a bar for each of those rows:
+
+```ts
+views: { area: { kind: 'chart', label: 'An area chart', Component: 'src/components/AreaView.tsx#AreaView' } },
+widgets: [chart('revenue-by-status', 'orders', { label: 'Revenue', measure: 'total', by: 'time', series: 'status', as: 'area' })],
+```
+
+```tsx
+'use client'
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
+import type { ChartViewProps } from 'payload-plugin-widgets/rsc'
+
+export const AreaView = ({ label, note, name, view, bars, series }: Omit<ChartViewProps, 'req'>) => {
+  // one series where the chart has only the one
+  const lines = series ?? [{ key: 'all', label, bars }]
+  // [{ label: 'Nov 25', at: 0, shipped: 2140.5, paid: 980 }, …]
+  const rows = bars.map((bar, at) => ({ label: bar.label, at, ...Object.fromEntries(lines.map(line => [line.key, line.bars[at].amount])) }))
+  // what a hovered point says: the amount as the plugin words it, in the viewer's language and currency
+  const worded = (key: unknown, at: number) => lines.find(line => line.key === key)?.bars[at]?.shown
+  return (
+    <section className="widgets-tile widgets-tile--plain" data-widget={name} data-view={view}>
+      <div className="widgets-tile__head">
+        <span className="widgets-tile__label">{label}</span>
+        <span className="widgets-tile__note">{note}</span>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <AreaChart data={rows}>
+          <XAxis dataKey="label" tickLine={false} axisLine={false} />
+          <Tooltip formatter={(value, called, item) => [worded(item.dataKey, item.payload.at) ?? String(value), called]} />
+          {lines.map((line, index) => (
+            <Area key={line.key} dataKey={line.key} name={line.label} stackId="all" stroke={`var(--widgets-series-${index + 1}, var(--theme-success-500))`} fill={`var(--widgets-series-${index + 1}, var(--theme-success-500))`} fillOpacity={0.2} />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </section>
+  )
+}
+```
+
+The tile's own classes keep it looking like the others; the numbers are already read with the viewer's access,
+narrowed by the widget's filter and period, and worded (`shown`) the way the other tiles word them.
 
 ### The data alone
 
@@ -685,6 +747,7 @@ so **anything a project writes wins without `!important`**, whatever its selecto
 | `--widgets-text`, `--widgets-muted`, `--widgets-label` | what it says, what it says under that, and what it is called |
 | `--widgets-label-size`, `--widgets-value-size`, `--widgets-text-size`, `--widgets-note-size` | |
 | `--widgets-chart-height`, `--widgets-spark-height` | how tall columns and a line are drawn, and the line under a figure |
+| `--widgets-series-1` … `--widgets-series-6` | the colours of a chart's series, the first being `--widgets-accent` |
 
 **Classes**, which keep their names:
 
@@ -694,6 +757,7 @@ so **anything a project writes wins without `!important`**, whatever its selecto
 | `.widgets-chart` | with `__label`, `__bar`, `__value` |
 | `.widgets-columns` | with `__bar`, `__label` |
 | `.widgets-line` | with `__stroke`, `__area`, `__labels` |
+| `.widgets-legend` | with `__mark`, `__total` |
 | `.widgets-quick`, `.widgets-note` | |
 
 **Attributes** each tile says of itself:

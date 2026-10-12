@@ -60,9 +60,12 @@ export const readList = <S extends CollectionSlug, F extends string, L extends s
   pick: Narrowed<F, K, S> & { list?: NoInfer<L>; limit?: number } = {},
 ) => listOf(contextFor(req), { source, ...pick } as ListPick)
 
-/** A measure as bars: over time, or split by one of the source's groups. */
+/**
+ * A measure as bars: over time, or split by one of the source's groups. Several measures, or a second group as
+ * `series`, are read as `series` besides: one for each, with a bar for every one of `bars`.
+ */
 export const readChart = <S extends CollectionSlug, F extends string, M extends string, G extends string, K extends string>(
   req: PayloadRequest,
   source: Source<S, F, M, Loose, G, K> | string,
-  pick: Narrowed<F, K, S> & Elevated & { measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>; by?: NoInfer<G> | 'time' } = {},
+  pick: Narrowed<F, K, S> & Elevated & { measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>> | (NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>)[]; by?: NoInfer<G> | 'time'; series?: NoInfer<G> } = {},
 ) => chartOf(contextFor(req), { source, ...pick } as ChartPick)

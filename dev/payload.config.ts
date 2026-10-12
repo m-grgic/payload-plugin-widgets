@@ -84,6 +84,8 @@ export default buildConfig({
     widgetsPlugin({
       currency: 'EUR',
       sources: { orders },
+      // a way of the demo's own to draw a chart: a component for the browser, as a chart library's would be
+      views: { donut: { kind: 'chart', label: 'A donut', Component: './components/Donut.tsx#Donut' } },
       widgets: [
         figure('revenue-month', orders, { label: 'Revenue this month', filter: 'sold', measure: 'revenue', period: 'month', compare: 'previous' }),
         figure('revenue-year', orders, { label: 'Revenue this year', filter: 'sold', measure: 'revenue', period: 'year', goal: 80000, as: 'progress' }),
@@ -91,6 +93,9 @@ export default buildConfig({
         figure('overdue-tasks', 'tasks', { label: 'Overdue tasks', where: { and: [{ dueDate: { less_than: 'today' } }, { status: { not_equals: 'done' } }] } }),
         chart('revenue-by-month', orders, { label: 'Revenue by month', filter: 'sold', measure: 'revenue', by: 'time', period: 'last12', as: 'columns' }),
         chart('orders-by-status', orders, { label: 'Orders by status', by: 'status', period: 'year' }),
+        chart('revenue-by-status', orders, { label: 'Orders by month and status', measure: 'revenue', by: 'time', series: 'status', period: 'last12', as: 'columns' }),
+        chart('revenue-and-orders', orders, { label: 'Revenue and orders', filter: 'sold', measure: ['revenue', 'count'], by: 'time', period: 'last12', as: 'line' }),
+        chart('tasks-donut', 'tasks', { label: 'Tasks by status', by: 'status', as: 'donut' }),
         list('latest-tasks', 'tasks', { label: 'Latest tasks', limit: 5 }),
         chart('new-customers', 'customers', { label: 'New customers', by: 'time', period: 'last12', as: 'line' }),
       ],

@@ -63,7 +63,10 @@ const guarded = async (context: Context, label: string, quiet: boolean | undefin
   }
 }
 
-/** What a way of the project's own to draw a widget is handed: what the tile would be made of, who asks, and the name it was asked for by. */
+/**
+ * What a way of the project's own to draw a widget is handed: what the tile would be made of, and the name it was
+ * asked for by. `req` is there for a server component only: a client component is handed the rest, which is plain data.
+ */
 type Viewed = Slots & { req: PayloadRequest; view: string }
 export type FigureViewProps = TileContent & More & Viewed
 export type ListViewProps = ListContent & Viewed & { api: string; words: { add: string; failed: string } }
@@ -75,7 +78,8 @@ const own = (req: PayloadRequest, kind: Kind, as: string | undefined, props: obj
   const { views } = settingsOf(req.payload)
   const problems = viewProblems(kind, as, views)
   if (problems.length) throw new Misconfigured(problems)
-  return RenderServerComponent({ Component: views[as].Component, importMap: req.payload.importMap, serverProps: { ...props, req, view: as } })
+  // what it shows is plain data, so the component may as well be one for the browser: only a server component is handed who asks
+  return RenderServerComponent({ Component: views[as].Component, importMap: req.payload.importMap, clientProps: { ...props, view: as }, serverProps: { req } })
 }
 
 /** The link a project adds is written in English like the rest. */
@@ -140,7 +144,7 @@ export const Records = async <S extends CollectionSlug, F extends string, L exte
 }
 
 export const Chart = async <S extends CollectionSlug, F extends string, M extends string, G extends string, K extends string>(
-  { req, label, quiet, name: called, as, action, after, ...picked }: Shown & Narrowed<F, K, S> & Elevated & { source: Source<S, F, M, Loose, G, K> | string; measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>; by?: NoInfer<G> | 'time' },
+  { req, label, quiet, name: called, as, action, after, ...picked }: Shown & Narrowed<F, K, S> & Elevated & { source: Source<S, F, M, Loose, G, K> | string; measure?: NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>> | (NoInfer<M> | Reckoned<NoInfer<M> | Numbers<S>>)[]; by?: NoInfer<G> | 'time'; /** Another group to tell every bar apart by. */ series?: NoInfer<G> },
 ) => {
   if (!req.user) return null
   const pick = picked as ChartPick
@@ -149,7 +153,7 @@ export const Chart = async <S extends CollectionSlug, F extends string, M extend
   return guarded(context, name, quiet, called, async () => {
     const chart = await readChart(context, pick)
     // on a page, a chart of nothing only takes up room
-    if (quiet && !chart.bars.some(bar => bar.amount)) return null
+    if (quiet && ![chart.bars, ...(chart.series ?? []).map(one => one.bars)].some(bars => bars.some(bar => bar.amount))) return null
     const tile = { ...chart, label: name, name: called, action: said(context, action), after }
     return own(req, 'chart', as, tile) ?? <ChartTile {...tile} as={as as keyof typeof VIEWS.chart | undefined} />
   })

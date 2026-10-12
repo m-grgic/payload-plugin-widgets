@@ -3,6 +3,18 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.3.0
+
+Charts with several series, and views that run in the browser.
+
+- **Added:** `series` on a chart: a series for each of what is in a second field, stacked where it adds up.
+  Offered in the drawer as "A series for each".
+- **Added:** `measure` on a chart takes several, a series each: `measure: ['revenue', 'count']`.
+- **Added:** a legend above a chart of several series, and `--widgets-series-1` to `-6` for their colours.
+- **Added:** `readChart` and `ChartViewProps` give `series` and `stacked` where a chart has several.
+- **Added:** a view may be a client component. `req` is handed to a server component only.
+- The README shows a view drawn with a chart library.
+
 ## 0.2.0
 
 Who a widget is for is asked the way Payload asks it of a collection.

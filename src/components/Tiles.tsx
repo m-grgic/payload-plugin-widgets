@@ -50,6 +50,12 @@ export interface ChartContent {
   /** `href` is the list behind it: without it the head is not a link. */
   label: string; note: string; href?: string; empty: string
   bars: { label: string; amount: number; shown: string; href?: string }[]
+  /**
+   * Several things drawn at once, each in a colour of its own: a bar for every one of `bars`, drawn against `peak`.
+   * Where they are `stacked` they are parts of `bars` and stand on one another.
+   */
+  series?: { key: string; label: string; total: string; peak: number; bars: { label: string; amount: number; shown: string }[] }[]
+  stacked?: boolean
 }
 
 /**
@@ -123,41 +129,65 @@ export const ListTile = ({ label, note, tone, href, rows, empty, add, quick, api
 )
 
 type Bars = ChartContent['bars']
-const share = (amount: number, peak: number) => Math.max(0, amount / peak)
+type Many = NonNullable<ChartContent['series']>
+const share = (amount: number, peak: number) => (peak ? Math.max(0, amount / peak) : 0)
+
+/** The colour a series is drawn in: there are six, and then they come round again. */
+const hue = (index: number) => ({ 'data-series': (index % 6) + 1 })
+/** What a bar says of each of its series, for the pointer and for whoever does not see it. */
+const told = (label: string, many: Many, index: number) => `${label}: ${many.map(one => `${one.label} ${one.bars[index]?.shown || '0'}`).join(', ')}`
+/** How long a series is at one bar: of what they all come to where they stand on one another, of its own most otherwise. */
+const lengths = (many: Many, stacked: boolean | undefined) => {
+  const most = Math.max(...(many[0]?.bars ?? []).map((_, index) => many.reduce((sum, one) => sum + Math.max(0, one.bars[index]?.amount ?? 0), 0)), 0)
+  return (one: Many[number], index: number) => `${share(one.bars[index]?.amount ?? 0, stacked ? most : one.peak) * 100}%`
+}
+/** Whether they stand on one another or side by side, for a stylesheet. */
+const arranged = (many: Many | undefined, stacked: boolean | undefined) => (many ? { 'data-many': stacked ? 'stacked' : 'grouped' } : {})
 
 /** One to a row: what it is, how long, how much. */
-const Rows = ({ bars, peak }: { bars: Bars; peak: number }) => (
-  <ul className="widgets-chart">
-    {bars.map((bar, index) => {
-      const inside = (
-        <>
-          <span className="widgets-chart__label">{bar.label}</span>
-          <span className="widgets-chart__bar" aria-hidden="true"><span style={{ width: `${share(bar.amount, peak) * 100}%` }} /></span>
-          <span className="widgets-chart__value">{bar.shown}</span>
-        </>
-      )
-      return <li key={index}>{bar.href ? <Link href={bar.href}>{inside}</Link> : <div>{inside}</div>}</li>
-    })}
-  </ul>
-)
+const Rows = ({ bars, peak, many, stacked }: { bars: Bars; peak: number; many?: Many; stacked?: boolean }) => {
+  const long = many && lengths(many, stacked)
+  return (
+    <ul className="widgets-chart" {...arranged(many, stacked)}>
+      {bars.map((bar, index) => {
+        const inside = (
+          <>
+            <span className="widgets-chart__label">{bar.label}</span>
+            {many && long && !stacked
+              ? <span className="widgets-chart__bars" aria-hidden="true">{many.map((one, at) => <span key={one.key} className="widgets-chart__bar"><span {...hue(at)} style={{ width: long(one, index) }} /></span>)}</span>
+              : <span className="widgets-chart__bar" aria-hidden="true">
+                {many && long ? many.map((one, at) => <span key={one.key} {...hue(at)} style={{ width: long(one, index) }} />) : <span style={{ width: `${share(bar.amount, peak) * 100}%` }} />}
+              </span>}
+            {/* a few side by side each say their own; of parts, or of many, what they come to */}
+            <span className="widgets-chart__value">{many && !stacked && many.length <= 3 ? many.map(one => one.bars[index]?.shown || '0').join(' · ') : bar.shown}</span>
+          </>
+        )
+        return <li key={index} title={many ? told(bar.label, many, index) : undefined}>{bar.href ? <Link href={bar.href}>{inside}</Link> : <div>{inside}</div>}</li>
+      })}
+    </ul>
+  )
+}
 
 /** As many labels as there is room for under what stands side by side: every one of a few, every so many of many. */
 const every = (count: number) => Math.ceil(count / 8)
 
 /** Side by side: how tall each is, with what it is under it and how much on the pointer. */
-const Columns = ({ bars, peak }: { bars: Bars; peak: number }) => {
+const Columns = ({ bars, peak, many, stacked }: { bars: Bars; peak: number; many?: Many; stacked?: boolean }) => {
   const step = every(bars.length)
+  const tall = many && lengths(many, stacked)
   return (
-  <ol className="widgets-columns">
+  <ol className="widgets-columns" {...arranged(many, stacked)}>
     {bars.map((bar, index) => {
       const inside = (
         <>
-          <span className="widgets-columns__bar" aria-hidden="true"><span style={{ height: `${share(bar.amount, peak) * 100}%` }} /></span>
+          <span className="widgets-columns__bar" aria-hidden="true">
+            {many && tall ? many.map((one, at) => <span key={one.key} {...hue(at)} style={{ height: tall(one, index) }} />) : <span style={{ height: `${share(bar.amount, peak) * 100}%` }} />}
+          </span>
           {/* it has the room of the columns up to the next one that is named */}
           <span className="widgets-columns__label" style={{ maxWidth: `${Math.min(step, bars.length - index) * 100}%` }}>{index % step ? '' : bar.label}</span>
         </>
       )
-      const said = `${bar.label}: ${bar.shown || '0'}`
+      const said = many ? told(bar.label, many, index) : `${bar.label}: ${bar.shown || '0'}`
       return <li key={index} title={said} aria-label={said}>{bar.href ? <Link href={bar.href}>{inside}</Link> : <div>{inside}</div>}</li>
     })}
   </ol>
@@ -166,28 +196,50 @@ const Columns = ({ bars, peak }: { bars: Bars; peak: number }) => {
 
 const HEIGHT = 40
 
-/** One line through all of them, with where it starts, its middle and where it ends named under it. */
-const Line = ({ bars, peak, label, spark }: { bars: Bars; peak: number; label: string; spark?: boolean }) => {
-  const points = bars.map((bar, index) => `${bars.length > 1 ? (index / (bars.length - 1)) * 100 : 50},${(HEIGHT - 1 - share(bar.amount, peak) * (HEIGHT - 2)).toFixed(2)}`)
+/** One line through all of them, with where it starts, its middle and where it ends named under it. Of several, a line each. */
+const Line = ({ bars, peak, label, spark, many }: { bars: Bars; peak: number; label: string; spark?: boolean; many?: Many }) => {
+  const through = (of: { amount: number }[], against: number) => of.map((bar, index) => `${of.length > 1 ? (index / (of.length - 1)) * 100 : 50},${(HEIGHT - 1 - share(bar.amount, against) * (HEIGHT - 2)).toFixed(2)}`).join(' ')
   const named = [...new Set([0, Math.floor((bars.length - 1) / 2), bars.length - 1])]
+  const said = many ? many.map(one => `${one.label} ${one.total}`) : bars.map(bar => `${bar.label} ${bar.shown || '0'}`)
   return (
     <span className={spark ? 'widgets-line widgets-line--spark' : 'widgets-line'}>
-      <svg viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${label}: ${bars.map(bar => `${bar.label} ${bar.shown || '0'}`).join(', ')}`}>
-        <polygon className="widgets-line__area" points={`0,${HEIGHT} ${points.join(' ')} 100,${HEIGHT}`} />
-        <polyline className="widgets-line__stroke" points={points.join(' ')} />
+      <svg viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${label}: ${said.join(', ')}`}>
+        {many ? many.map((one, at) => <polyline key={one.key} className="widgets-line__stroke" {...hue(at)} points={through(one.bars, one.peak)} />) : (
+          <>
+            <polygon className="widgets-line__area" points={`0,${HEIGHT} ${through(bars, peak)} 100,${HEIGHT}`} />
+            <polyline className="widgets-line__stroke" points={through(bars, peak)} />
+          </>
+        )}
       </svg>
       {spark ? null : <span className="widgets-line__labels">{named.map(index => <span key={index}>{bars[index].label}</span>)}</span>}
     </span>
   )
 }
 
-/** A measure over time or by group: bars one to a row unless it is asked for as columns or as a line. */
-export const ChartTile = ({ label, note, href, bars, empty, action, after, name, as = 'bars' }: ChartContent & Slots & { as?: 'bars' | 'columns' | 'line' }) => {
-  const peak = Math.max(...bars.map(bar => Math.abs(bar.amount)), 0)
+/** Which colour is which, and what each comes to. */
+const Legend = ({ many }: { many: Many }) => (
+  <ul className="widgets-legend">
+    {many.map((one, at) => (
+      <li key={one.key} {...hue(at)}>
+        <span className="widgets-legend__mark" aria-hidden="true" />
+        <span>{one.label}</span>
+        <span className="widgets-legend__total">{one.total}</span>
+      </li>
+    ))}
+  </ul>
+)
+
+/**
+ * A measure over time or by group: bars one to a row unless it is asked for as columns or as a line. Several
+ * measures, or one told apart by a second group, are drawn each in its own colour and named under the head.
+ */
+export const ChartTile = ({ label, note, href, bars, empty, series, stacked, action, after, name, as = 'bars' }: ChartContent & Slots & { as?: 'bars' | 'columns' | 'line' }) => {
+  const many = series?.length ? series : undefined
+  const peak = Math.max(...(many ? many.map(one => one.peak) : bars.map(bar => Math.abs(bar.amount))), 0)
   const head = (
     <>
       <span className="widgets-tile__label">{label}</span>
-      <span className="widgets-tile__note">{note}</span>
+      {note ? <span className="widgets-tile__note">{note}</span> : null}
     </>
   )
   return (
@@ -196,10 +248,14 @@ export const ChartTile = ({ label, note, href, bars, empty, action, after, name,
         {href ? <Link href={href}>{head}</Link> : <div>{head}</div>}
         <Extra action={action} />
       </div>
-      {!bars.length || !peak ? <span className="widgets-tile__note">{empty}</span>
-        : as === 'columns' ? <Columns bars={bars} peak={peak} />
-          : as === 'line' ? <Line bars={bars} peak={peak} label={label} />
-            : <Rows bars={bars} peak={peak} />}
+      {!bars.length || !peak ? <span className="widgets-tile__note">{empty}</span> : (
+        <>
+          {many ? <Legend many={many} /> : null}
+          {as === 'columns' ? <Columns bars={bars} peak={peak} many={many} stacked={stacked} />
+            : as === 'line' ? <Line bars={bars} peak={peak} label={label} many={many} />
+              : <Rows bars={bars} peak={peak} many={many} stacked={stacked} />}
+        </>
+      )}
       {after}
     </section>
   )

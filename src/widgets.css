@@ -22,10 +22,11 @@
  *      --widgets-label         what it is called
  *      --widgets-label-size, --widgets-value-size, --widgets-text-size, --widgets-note-size
  *      --widgets-chart-height  how tall columns and a line are drawn, and --widgets-spark-height the line under a figure
+ *      --widgets-series-1 … -6 the colours of a chart's series, the first being --widgets-accent where it is not given
  *
  * 2. The classes: `.widgets-tile` with `__label`, `__value`, `__progress`, `__note`, `__head`, `__rows`, `__late`, `__action`,
  *    `__add`; `.widgets-chart` with `__label`, `__bar`, `__value`; `.widgets-columns` with `__bar`, `__label`;
- *    `.widgets-line` with `__stroke`, `__area`, `__labels`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
+ *    `.widgets-line` with `__stroke`, `__area`, `__labels`; `.widgets-legend` with `__mark`, `__total`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
  *
  * 3. What each tile says of itself: `data-kind` (figure, list, chart, notice, note), `data-tone` (calm, warn, bad),
  *    `data-view` (number, progress, sparkline; bars, columns, line), on a figure that is compared `data-trend` (up,
@@ -374,5 +375,89 @@
   }
   .widgets-note a {
     font-size: var(--widgets-text-size, 14px);
+  }
+  /* several at once: each in a colour of its own, named under the head with what it comes to */
+  .widgets-tile [data-series] {
+    --widgets-series: var(--widgets-series-1, var(--widgets-accent, var(--theme-success-500)));
+  }
+  .widgets-tile [data-series='2'] {
+    --widgets-series: var(--widgets-series-2, var(--theme-warning-500));
+  }
+  .widgets-tile [data-series='3'] {
+    --widgets-series: var(--widgets-series-3, var(--theme-elevation-800));
+  }
+  .widgets-tile [data-series='4'] {
+    --widgets-series: var(--widgets-series-4, var(--theme-error-500));
+  }
+  .widgets-tile [data-series='5'] {
+    --widgets-series: var(--widgets-series-5, var(--theme-success-300));
+  }
+  .widgets-tile [data-series='6'] {
+    --widgets-series: var(--widgets-series-6, var(--theme-elevation-400));
+  }
+  .widgets-chart__bar span[data-series],
+  .widgets-columns__bar span[data-series],
+  .widgets-legend__mark {
+    background: var(--widgets-series);
+  }
+  .widgets-line__stroke[data-series] {
+    stroke: var(--widgets-series);
+  }
+  .widgets-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 0 0 8px;
+    padding: 0;
+    list-style: none;
+    color: var(--widgets-muted, var(--theme-elevation-650));
+    font-size: var(--widgets-note-size, 13px);
+  }
+  .widgets-legend li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .widgets-legend__mark {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+  .widgets-legend__total {
+    color: var(--widgets-text, var(--theme-text));
+    font-variant-numeric: tabular-nums;
+  }
+  /* parts of one bar follow one another in it; several of their own lie one under the other */
+  .widgets-chart[data-many='stacked'] .widgets-chart__bar {
+    display: flex;
+    overflow: hidden;
+  }
+  .widgets-chart[data-many='stacked'] .widgets-chart__bar span {
+    flex: none;
+    border-radius: 0;
+  }
+  .widgets-chart__bars {
+    display: grid;
+    gap: 2px;
+  }
+  .widgets-chart[data-many='grouped'] .widgets-chart__bar {
+    height: 4px;
+  }
+  .widgets-columns[data-many='grouped'] .widgets-columns__bar {
+    gap: 1px;
+  }
+  .widgets-columns[data-many='grouped'] .widgets-columns__bar span {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+  .widgets-columns[data-many='stacked'] .widgets-columns__bar {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .widgets-columns[data-many='stacked'] .widgets-columns__bar span {
+    flex: none;
+    border-radius: 0;
   }
 }

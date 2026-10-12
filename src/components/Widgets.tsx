@@ -62,7 +62,7 @@ export const RecordsWidget = async ({ req, widgetData: data }: WidgetServerProps
 
 export const ChartWidget = async ({ req, widgetData: data }: WidgetServerProps) => {
   if (!data?.source) return unset(req, 'A chart')
-  return <Chart req={req} {...picked(data)} measure={measured(req, data)} by={data.by === 'time' ? 'time' : chosen(data.by, data.source) ?? 'time'} />
+  return <Chart req={req} {...picked(data)} measure={measured(req, data)} by={data.by === 'time' ? 'time' : chosen(data.by, data.source) ?? 'time'} series={chosen(data.series, data.source)} />
 }
 
 /** A ready-made widget: one of those the plugin was given, found by the slug it is drawn for. */

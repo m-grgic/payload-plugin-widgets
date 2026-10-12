@@ -1,9 +1,9 @@
 import type { Access, CollectionSlug, FlattenedField, Where } from 'payload'
-import { dateProblems, figureProblems, measureProblems, Misconfigured, nameProblems, noSource, Unavailable, isDate, whereProblems, type Problem } from './check'
+import { dateProblems, figureProblems, measureProblems, seriesProblems, Misconfigured, nameProblems, noSource, Unavailable, isDate, whereProblems, type Problem } from './check'
 import { accessTo, readable, sourceCalled } from './options'
 import { after } from './time'
 import { months, timed as atMoments } from './when'
-import { added, amountOf, CALLED, calcOf, combined, currencyOf, fetched, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
+import { amountOf, CALLED, calcOf, combined, currencyOf, fetched, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
 
 // What a widget shows, read out of a source: a figure, a short list, or bars over time or by group.
 // The same three serve the dashboard and any other page, which may pass a scope: one project, one client.
@@ -46,11 +46,25 @@ export interface FigurePick extends Pick, Elevated {
   as?: string
 }
 export interface ListPick extends Pick { list?: string; limit?: number }
-export interface ChartPick extends Pick, Elevated { measure?: Measured; by?: string }
+export interface ChartPick extends Pick, Elevated {
+  /** One measure, or several to set side by side: each is then a series. */
+  measure?: Measured | Measured[]
+  by?: string
+  /** One of the source's groups to tell every bar apart by: each of the first few of its values is then a series. */
+  series?: string
+}
 
 export interface Bar { label: string; amount: number; shown: string; href?: string }
-/** `href` is the list behind it: there for whoever the collection lets read. */
-export interface ChartReading { note: string; href?: string; bars: Bar[]; empty: string }
+/**
+ * One of several things a chart draws at once: a measure, or one value of what it is told apart by. Its bars are the
+ * chart's own, one for one. `peak` is what they are drawn against: the same for the series that count the same thing.
+ */
+export interface Series { key: string; label: string; total: string; peak: number; bars: Bar[] }
+/**
+ * `href` is the list behind it: there for whoever the collection lets read. With `series`, `bars` are the first
+ * measure's, or all of what is told apart taken together; `stacked` says the series add up to them.
+ */
+export interface ChartReading { note: string; href?: string; bars: Bar[]; empty: string; series?: Series[]; stacked?: boolean }
 
 export { Misconfigured, Unavailable }
 
@@ -101,7 +115,7 @@ const from = async (asked: Context, pick: Pick & Elevated, kind: 'figure' | 'lis
 const dateOf = (source: AnySource, pick: Pick): string => (typeof pick.date === 'string' && /^[\w.]+$/.test(pick.date) ? pick.date : source.date ?? 'createdAt')
 
 /** Said before anything is read: what a widget picks that its source or its collection does not have. */
-const sound = (context: Context, source: AnySource, pick: FigurePick & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
+const sound = (context: Context, source: AnySource, pick: Omit<FigurePick, 'measure'> & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
   const fields = context.payload.collections[source.slug as CollectionSlug]?.config.flattenedFields ?? []
   const scopes: Problem[] = Object.entries(pick.scope ?? {})
     .filter(([name, id]) => id !== undefined && id !== null && !source.scopes?.[name])
@@ -110,7 +124,8 @@ const sound = (context: Context, source: AnySource, pick: FigurePick & ListPick 
   const problems = [
     ...nameProblems(source, pick, kind), ...scopes,
     ...whereProblems(source.slug, fields, pick.where),
-    ...(kind === 'list' ? [] : measureProblems(source, fields, pick.measure)),
+    ...(kind === 'list' ? [] : [pick.measure].flat().flatMap(measure => measureProblems(source, fields, measure))),
+    ...(kind === 'chart' ? seriesProblems(pick) : []),
     ...(kind === 'figure' ? figureProblems(pick as FigurePick) : []),
     ...dateProblems(source.slug, fields, typeof pick.date === 'string' ? pick.date : undefined),
   ]
@@ -171,10 +186,11 @@ const chosen = (context: Context, source: AnySource, pick: Pick, fixed?: string,
 }
 
 /** What to call it where nobody gave it a name: the source, and what of it. */
-export const titleOf = (context: Context, pick: FigurePick & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
+export const titleOf = (context: Context, pick: Omit<FigurePick, 'measure'> & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
   const source = named(context, pick.source)
   if (!source) return context.t('Widget')
-  const part = kind === 'list' ? source.lists?.[pick.list ?? ''] : measureOf(context, source, pick.measure)
+  // several measures are named by the chart itself, each for its own
+  const part = kind === 'list' ? source.lists?.[pick.list ?? ''] : Array.isArray(pick.measure) ? undefined : measureOf(context, source, pick.measure)
   const filter = source.filters[part?.filter ?? pick.filter ?? '']
   const what = part && !('counts' in part && part.counts) ? context.t(part.label) : ''
   const split = kind === 'chart' && pick.by && pick.by !== 'time' ? (source.groups as Record<string, Label> | undefined)?.[pick.by] : undefined
@@ -294,15 +310,35 @@ const called = async (context: Context, source: AnySource, field: string, keys: 
 }
 
 const MOST = 8
+/** As many series as a chart tells apart: what is left over is one more. */
+const SERIES = 5
+
+type Row = Record<string, unknown>
+
+/** The values a record has in a field, as text: what it points at by its id, and one of nothing where it has none. */
+const valuesOf = (doc: Row, field: string): string[] => {
+  const value = doc[field]
+  const keys = (Array.isArray(value) ? value : [value]).filter(key => key !== null && key !== undefined && key !== '')
+  return keys.length ? keys.map(key => (typeof key === 'object' ? String((key as { id: unknown }).id) : String(key))) : ['']
+}
+
+/** The amounts of the records, each under what it belongs to. */
+const sorted = (docs: Row[], amount: Amount<Row>, keysOf: (doc: Row) => string[]) => {
+  const each = new Map<string, number[]>()
+  for (const doc of docs) for (const key of keysOf(doc)) each.set(key, [...(each.get(key) ?? []), amount.of(doc)])
+  return each
+}
 
 export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartReading> => {
   const { source, narrowed, context, linked } = await from(asked, pick, 'chart')
   sound(context, source, pick, 'chart')
-  const measure = measureOf(context, source, pick.measure)
-  const amount = measure?.amount as Amount<Record<string, unknown>> | undefined
-  if (!measure || !amount) throw new Misconfigured([{ text: '{source} has no measure called "{name}" that can be drawn', vars: { source: source.slug, name: String(pick.measure ?? 'count') } }])
+  const picked = [pick.measure].flat()
+  const measures = picked.map(one => measureOf(context, source, one))
+  const lacking = measures.findIndex(measure => !measure?.amount)
+  if (lacking >= 0) throw new Misconfigured([{ text: '{source} has no measure called "{name}" that can be drawn', vars: { source: source.slug, name: String(picked[lacking] ?? 'count') } }])
 
   const by = pick.by && pick.by !== 'time' ? pick.by : null
+  const apart = pick.series || null
   const date = dateOf(source, pick)
   // over time there has to be an end to it: a year back where nothing else is said
   let timed: Pick = pick
@@ -313,74 +349,113 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     if (pick.period === 'upcoming') timed = { ...pick, period: 'custom', from: context.today, to: after(context.today, 180) }
     else if (!start) timed = { ...pick, period: 'custom', from: `${after(`${last.slice(0, 7)}-01`, -340).slice(0, 7)}-01`, to: end ?? undefined }
   }
-  const { selection } = chosen(context, source, timed, measure.filter, narrowed)
 
-  const docs = await fetched<Record<string, unknown>>(context, source, selection, [...new Set([...amount.select, by ?? date])])
   // money is drawn in one currency; what is in another is said, not added
   const main = context.currency.toUpperCase()
-  const kept = amount.format === 'money' ? docs.filter(doc => currencyOf(context, amount, doc) === main) : docs
-  const left = docs.length - kept.length
-  const show = (value: number) => shown(context, amount.format, new Map([[amount.format === 'money' ? main : '', value]]))
-  const whole = show([...added(context, kept, amount).values()].reduce((sum, value) => sum + value, 0))
+  const read = async (measure: Measure) => {
+    const amount = measure.amount as Amount<Row>
+    const { selection } = chosen(context, source, timed, measure.filter, narrowed)
+    const docs = await fetched<Row>(context, source, selection, [...new Set([...amount.select, by ?? date, ...(apart ? [apart] : [])])])
+    return {
+      measure, amount, selection, docs,
+      kept: amount.format === 'money' ? docs.filter(doc => currencyOf(context, amount, doc) === main) : docs,
+      show: (value: number) => shown(context, amount.format, new Map([[amount.format === 'money' ? main : '', value]])),
+    }
+  }
+  // each measure has its own records: one may count only some of them
+  const all = await Promise.all(measures.map(measure => read(measure as Measure)))
+  const [first] = all
+  const { selection } = first
+  const whole = (docs: Row[], amount: Amount<Row>) => combined(amount.how, docs.map(amount.of))
+
+  const left = Math.max(...all.map(one => one.docs.length - one.kept.length))
   const note = [
-    whole, left ? context.t('{count} in another currency left out', { count: left }) : '',
+    // of several, each says its own
+    all.length > 1 ? '' : first.show(whole(first.kept, first.amount)),
+    left ? context.t('{count} in another currency left out', { count: left }) : '',
     // more than can be read at once: said, so the chart is not taken for all of them
-    docs.length >= MANY ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
+    all.some(one => one.docs.length >= MANY) ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
   ].filter(Boolean).join(' · ')
   const href = linked ? context.list(source.slug, selection.filter) : undefined
   const empty = context.t('Nothing to show yet')
+  if (all.every(one => !one.kept.length)) return { note, href, empty, bars: [] }
 
+  // what is drawn at once: the measures, or the records of the one measure told apart by what they have in a field
+  let parts = all.map((one, index) => ({
+    key: typeof picked[index] === 'string' ? picked[index] as string : calcOf(picked[index])?.join('-') ?? 'count',
+    label: context.t(one.measure.label), docs: one.kept, amount: one.amount, show: one.show,
+  }))
+  if (apart) {
+    const each = new Map<string, Row[]>()
+    for (const doc of first.kept) for (const key of valuesOf(doc, apart)) each.set(key, [...(each.get(key) ?? []), doc])
+    const ranked = [...each].sort((a, b) => whole(b[1], first.amount) - whole(a[1], first.amount))
+    const names = await called(context, source, apart, ranked.slice(0, SERIES).map(([key]) => key).filter(Boolean))
+    const rest = ranked.slice(SERIES).flatMap(([, docs]) => docs)
+    parts = [
+      ...ranked.slice(0, SERIES).map(([key, docs]) => ({ key: key || '_none', label: key ? names.get(key) ?? `#${key}` : context.t('None'), docs, amount: first.amount, show: first.show })),
+      ...(rest.length ? [{ key: '_other', label: context.t('Other'), docs: rest, amount: first.amount, show: first.show }] : []),
+    ]
+  }
+
+  // the bars there are, and which of them a record belongs to. `keys` of none is whatever no other bar has.
+  let slots: { label: string; keys?: string[]; href?: string }[]
+  let keysOf: (doc: Row) => string[]
   if (!by) {
-    const { start: first, end } = span(context, timed)
-    const start = first as string
+    const { start: from, end } = span(context, timed)
+    const start = from as string
     const last = end && end < context.today ? end : end ?? context.today
     // by day up to two months, by month beyond
     const daily = (new Date(last).getTime() - new Date(start).getTime()) / 86400000 <= 62
-    const buckets = new Map<string, number[]>()
+    slots = []
     // every month or day in the period has its bar, also the empty ones
     for (let at = new Date(`${daily ? start : `${start.slice(0, 7)}-01`}T00:00:00Z`); at.toISOString().slice(0, 10) <= last;) {
-      buckets.set(at.toISOString().slice(0, daily ? 10 : 7), [])
+      const key = at.toISOString().slice(0, daily ? 10 : 7)
+      slots.push({ label: daily ? context.day(key) : context.month(key), keys: [key] })
       if (daily) at.setUTCDate(at.getUTCDate() + 1)
       else at.setUTCMonth(at.getUTCMonth() + 1)
     }
-    for (const doc of kept) {
-      const value = doc[date]
-      if (typeof value !== 'string') continue
-      const key = context.date(value).slice(0, daily ? 10 : 7)
-      buckets.get(key)?.push(amount.of(doc))
-    }
-    return {
-      note, href, empty,
-      bars: kept.length ? [...buckets].map(([key, values]) => {
-        const value = combined(amount.how, values)
-        return { label: daily ? context.day(key) : context.month(key), amount: value, shown: value ? show(value) : '' }
-      }) : [],
-    }
+    keysOf = doc => (typeof doc[date] === 'string' ? [context.date(doc[date] as string).slice(0, daily ? 10 : 7)] : [])
+  } else {
+    keysOf = doc => valuesOf(doc, by)
+    // the most of the first measure come first
+    const most = [...sorted(first.kept, first.amount, keysOf)].map(([key, values]) => [key, combined(first.amount.how, values)] as const).sort((a, b) => b[1] - a[1]).slice(0, MOST)
+    const names = await called(context, source, by, most.map(([key]) => key).filter(Boolean))
+    slots = most.map(([key]) => ({
+      label: key ? names.get(key) ?? `#${key}` : context.t('None'), keys: [key],
+      ...(linked ? { href: context.list(source.slug, (key ? selection.and({ [by]: { equals: key } }) : selection.and({ [by]: { exists: false } })).filter) } : {}),
+    }))
+    slots.push({ label: context.t('Other') })
   }
 
-  const each = new Map<string, number[]>()
-  for (const doc of kept) {
-    const value = doc[by]
-    const keys = (Array.isArray(value) ? value : [value]).filter(key => key !== null && key !== undefined && key !== '')
-    for (const key of keys.length ? keys : ['']) {
-      const id = typeof key === 'object' ? String((key as { id: unknown }).id) : String(key)
-      each.set(id, [...(each.get(id) ?? []), amount.of(doc)])
-    }
+  const named = new Set(slots.flatMap(slot => slot.keys ?? []))
+  const barsOf = (docs: Row[], amount: Amount<Row>, show: (value: number) => string, links: boolean): Bar[] => {
+    const each = sorted(docs, amount, keysOf)
+    return slots.map(slot => {
+      // what is left over is made one the same way: the average of the rest, not the sum of their averages
+      const value = combined(amount.how, slot.keys ? slot.keys.flatMap(key => each.get(key) ?? []) : [...each].flatMap(([key, values]) => (named.has(key) ? [] : values)))
+      // over time a day of nothing says nothing
+      return { label: slot.label, amount: value, shown: value || by ? show(value) : '', ...(links && slot.href ? { href: slot.href } : {}) }
+    })
   }
-  const sorted = [...each].map(([key, values]) => [key, combined(amount.how, values)] as const).sort((a, b) => b[1] - a[1])
-  const names = await called(context, source, by, sorted.slice(0, MOST).map(([key]) => key).filter(Boolean))
-  // what is left over is made one the same way: the average of the rest, not the sum of their averages
-  const rest = combined(amount.how, sorted.slice(MOST).flatMap(([key]) => each.get(key) ?? []))
+  let bars = barsOf(first.kept, first.amount, first.show, true)
+  const several = parts.length > 1 || !!apart
+  let series = several ? parts.map(part => ({ part, bars: barsOf(part.docs, part.amount, part.show, false) })) : []
+  // nothing is left over unless something is
+  const over = by ? slots.length - 1 : -1
+  if (over >= 0 && ![bars, ...series.map(one => one.bars)].some(drawn => drawn[over].amount)) {
+    bars = bars.slice(0, over)
+    series = series.map(one => ({ ...one, bars: one.bars.slice(0, over) }))
+  }
+  if (!several) return { note, href, empty, bars }
+
+  // what counts the same thing is drawn against the same height
+  const peakOf = (drawn: Bar[]) => Math.max(...drawn.map(bar => Math.abs(bar.amount)), 0)
+  const alike = parts.every(part => part.amount.format === first.amount.format)
+  const shared = Math.max(...series.map(one => peakOf(one.bars)), 0)
   return {
-    note, href, empty,
-    bars: [
-      ...sorted.slice(0, MOST).map(([key, value]) => ({
-        label: key ? names.get(key) ?? `#${key}` : context.t('None'),
-        amount: value,
-        shown: show(value),
-        ...(linked ? { href: context.list(source.slug, (key ? selection.and({ [by]: { equals: key } }) : selection.and({ [by]: { exists: false } })).filter) } : {}),
-      })),
-      ...(rest ? [{ label: context.t('Other'), amount: rest, shown: show(rest) }] : []),
-    ],
+    note, href, empty, bars,
+    series: series.map(({ part, bars: drawn }) => ({ key: part.key, label: part.label, total: part.show(whole(part.docs, part.amount)), peak: alike ? shared : peakOf(drawn), bars: drawn })),
+    // parts of one whole stand on one another
+    stacked: !!apart && (!first.amount.how || first.amount.how === 'sum'),
   }
 }

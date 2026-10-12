@@ -25,6 +25,7 @@ export const STRINGS = [
   'Period', 'Going by', 'Leave empty for the usual date.',
   'From', 'Leave empty for no beginning.', 'Until', 'Leave empty for until now.',
   // periods
+  'A series for each', 'Leave empty for one.',
   'Any time', 'Today', 'Before today', 'From today on', 'This month', 'This year', 'The last 30 days', 'The last 12 months', 'Between two dates',
   // what a collection has without declaring it
   'How many', 'Average {what}', 'Lowest {what}', 'Highest {what}', 'Created', 'Updated', 'The latest', 'Nothing here yet',
@@ -52,6 +53,7 @@ export const STRINGS = [
   'A {kind} cannot be drawn as "{name}"',
   'A list is read as whoever looks at it: only a figure or a chart takes overrideAccess',
   'What is read with overrideAccess has to say who it is for: give it or its source an access',
+  'A chart tells apart its measures or what is in a field, not both', 'A chart cannot be split by "{name}" twice',
   'Progress is towards a goal: give it one',
   'There is nothing before this to compare it with: give it a period that has a beginning',
   '"{name}" of {source} gives no number to compare or to set against a goal',

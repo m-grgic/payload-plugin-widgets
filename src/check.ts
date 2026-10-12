@@ -80,8 +80,14 @@ export const elevatedProblems = (kind: Kind, widget: { access?: unknown; overrid
     ? [{ text: 'What is read with overrideAccess has to say who it is for: give it or its source an access', vars: {} }] : []),
 ]
 
+/** What a chart is asked to tell apart that it cannot: one thing at a time, and not what its bars already are. */
+export const seriesProblems = (pick: { measure?: unknown; by?: string; series?: string }): Problem[] => [
+  ...(pick.series && Array.isArray(pick.measure) && pick.measure.length > 1 ? [{ text: 'A chart tells apart its measures or what is in a field, not both', vars: {} }] : []),
+  ...(pick.series && pick.series === pick.by ? [{ text: 'A chart cannot be split by "{name}" twice', vars: { name: pick.series } }] : []),
+]
+
 /** What a widget picks from its source by name. */
-export interface Names { filter?: string; measure?: string | object; list?: string; by?: string }
+export interface Names { filter?: string; measure?: string | object | (string | object | undefined)[]; list?: string; by?: string; series?: string }
 
 /** The names a widget picks that its source does not have. */
 export const nameProblems = (source: AnySource, pick: Names, kind: 'figure' | 'list' | 'chart'): Problem[] => {
@@ -89,16 +95,20 @@ export const nameProblems = (source: AnySource, pick: Names, kind: 'figure' | 'l
   const found: Problem[] = []
   if (pick.filter && !source.filters[pick.filter]) found.push(missing('{source} has no filter called "{name}"', vars(pick.filter), Object.keys(source.filters)))
   // one said in place is checked against the collection's fields, once those are known: see `measureProblems`
-  if (kind !== 'list' && typeof pick.measure === 'string') {
+  for (const measure of kind === 'list' ? [] : [pick.measure].flat()) {
+    if (typeof measure !== 'string') continue
     // a chart draws only what is a number in each record
     const measures = Object.keys(source.measures).filter(name => kind === 'figure' || !!source.measures[name].amount)
-    if (!measures.includes(pick.measure)) {
-      found.push(missing(kind === 'chart' ? '{source} has no measure called "{name}" that can be drawn' : '{source} has no measure called "{name}"', vars(pick.measure), measures))
+    if (!measures.includes(measure)) {
+      found.push(missing(kind === 'chart' ? '{source} has no measure called "{name}" that can be drawn' : '{source} has no measure called "{name}"', vars(measure), measures))
     }
   }
   if (kind === 'list' && pick.list && !source.lists?.[pick.list]) found.push(missing('{source} has no list called "{name}"', vars(pick.list), Object.keys(source.lists ?? {})))
   if (kind === 'chart' && pick.by && pick.by !== 'time' && !(source.groups as Record<string, unknown> | undefined)?.[pick.by]) {
     found.push(missing('{source} cannot be split by "{name}"', vars(pick.by), Object.keys(source.groups ?? {})))
+  }
+  if (kind === 'chart' && pick.series && !(source.groups as Record<string, unknown> | undefined)?.[pick.series]) {
+    found.push(missing('{source} cannot be split by "{name}"', vars(pick.series), Object.keys(source.groups ?? {})))
   }
   return found
 }

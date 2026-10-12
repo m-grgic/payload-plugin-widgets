@@ -82,7 +82,7 @@ export interface SourceWidget extends Kept, Slots {
   /** The source itself, or the collection of one that was found by the plugin. */
   source: AnySource | string
   overrideAccess?: boolean
-  show: { filter?: string; where?: Where; period?: Period; date?: string; from?: string; to?: string; measure?: string | Reckoned; list?: string; limit?: number; by?: string; as?: string; compare?: 'previous'; goal?: number; note?: string }
+  show: { filter?: string; where?: Where; period?: Period; date?: string; from?: string; to?: string; measure?: string | Reckoned | (string | Reckoned)[]; list?: string; limit?: number; by?: string; series?: string; as?: string; compare?: 'previous'; goal?: number; note?: string }
 }
 
 /** A widget drawn by a component of the project's own: made with `widget`. */
@@ -147,7 +147,15 @@ export const list: {
   <const S extends CollectionSlug>(slug: string, source: S, show: ListShow<S, never, 'latest'>): Widget
 } = (slug: string, source: AnySource | string, show: Loose) => made('list', slug, source, show)
 
-type ChartShow<S extends CollectionSlug, F extends string, M extends string, G extends string> = Common & Slots & Elevated & Narrowed<S, F> & { measure?: M | Reckoned<M | Numbers<S>>; by?: G | 'time'; /** Bars one to a row, columns side by side, or a line: `'columns'`. */ as?: As<'chart'> }
+type ChartShow<S extends CollectionSlug, F extends string, M extends string, G extends string> = Common & Slots & Elevated & Narrowed<S, F> & {
+  /** One measure, or several to set side by side: `['revenue', 'costs']`. Each is then a series. */
+  measure?: M | Reckoned<M | Numbers<S>> | (M | Reckoned<M | Numbers<S>>)[]
+  by?: G | 'time'
+  /** Another of the source's groups to tell every bar apart by: `by: 'time', series: 'status'`. Each of the first few of its values is then a series. */
+  series?: G
+  /** Bars one to a row, columns side by side, or a line: `'columns'`. */
+  as?: As<'chart'>
+}
 
 /** A measure over time, or split by one of the source's groups, as bars unless `as` says otherwise; of a collection by its slug, by any of its selects, checkboxes and relationships. */
 export const chart: {

@@ -1,5 +1,5 @@
 import type { CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
-import { dateProblems, elevatedProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, viewProblems, whereProblems, type Problem } from './check'
+import { dateProblems, elevatedProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
 import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
 
@@ -88,7 +88,8 @@ const misnamed = (settings: Settings): [string, Problem][] => settings.widgets.f
   return [
     ...elevatedProblems(widget.kind, widget, source),
     ...nameProblems(source, widget.show, widget.kind), ...viewProblems(widget.kind, widget.show.as, settings.views),
-    ...(widget.kind === 'figure' ? figureProblems(widget.show) : []),
+    ...(widget.kind === 'figure' ? figureProblems(widget.show as never) : []),
+    ...(widget.kind === 'chart' ? seriesProblems(widget.show) : []),
   ].map(problem => [widget.slug, problem])
 })
 
@@ -100,7 +101,7 @@ const misfiltered = (settings: Settings, payload: Payload): [string, Problem][] 
   if (!source || !fields) return []
   return [
     ...whereProblems(source.slug, fields, widget.show.where), ...dateProblems(source.slug, fields, widget.show.date),
-    ...(widget.kind === 'list' ? [] : measureProblems(source, fields, widget.show.measure)),
+    ...(widget.kind === 'list' ? [] : [widget.show.measure].flat().flatMap(measure => measureProblems(source, fields, measure))),
   ].map(problem => [widget.slug, problem])
 })
 
