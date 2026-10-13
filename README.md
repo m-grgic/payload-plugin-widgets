@@ -1,10 +1,20 @@
 # payload-plugin-widgets
 
-Dashboard widgets for [Payload](https://payloadcms.com) that read from your collections: **figures, lists and
-charts**. Add the plugin and every collection can be put on the dashboard; whoever is signed in sets a widget up in
-a drawer, a project puts some there ready-made, and the same three can stand on any other page of the admin.
+[![npm version](https://img.shields.io/npm/v/payload-plugin-widgets)](https://www.npmjs.com/package/payload-plugin-widgets)
+[![npm downloads](https://img.shields.io/npm/dm/payload-plugin-widgets)](https://www.npmjs.com/package/payload-plugin-widgets)
+[![CI](https://img.shields.io/github/actions/workflow/status/m-grgic/payload-plugin-widgets/ci.yml?branch=main&label=CI)](https://github.com/m-grgic/payload-plugin-widgets/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/npm/l/payload-plugin-widgets?label=licence)](https://github.com/m-grgic/payload-plugin-widgets/blob/main/LICENSE)
 
-![A dashboard of figures, charts and a list](./docs/dashboard.png)
+A [Payload CMS](https://payloadcms.com) plugin for dashboard widgets that read from your collections: **KPI figures,
+lists and charts**. Add the plugin and every collection can be put on the admin dashboard; whoever is signed in sets
+a widget up in a drawer, a project puts some there ready-made, and the same three can stand on any other page of
+the admin.
+
+```sh
+pnpm add payload-plugin-widgets   # or npm install, or yarn add
+```
+
+![A Payload admin dashboard of KPI figures, charts and a list](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/dashboard.png)
 
 - **Nothing to declare.** Every collection is a source as its fields describe it: how many there are, a sum for
   each number, a group for each select, checkbox and relationship, a list of the latest.
