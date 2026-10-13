@@ -1,10 +1,12 @@
 import type { Access, CollectionConfig, CollectionSlug, Config, Field, Where } from 'payload'
+import { at } from './formula'
 import { count, labelled, reckoned, rows, sum, type AnySource, type Format, type Label, type Measure } from './types'
 
 // What a collection offers to the widgets without anybody declaring it, read out of its fields: how many there are,
 // a sum for each number, a group for each select, checkbox and relationship, every date a period can go by, how to
-// narrow it to one of what it points at, and a list of the latest. Which of its records is not found here: that is
-// a filter as Payload takes them, which a widget is given (see `where` in ./read).
+// narrow it to one of what it points at, and a list of the latest. Fields inside a group, a named tab or the rows of
+// an array are found as well, under their paths (`totals.net`, `items.price`); those in blocks are not. Which of its
+// records is not found here: that is a filter as Payload takes them, which a widget is given (see `where` in ./read).
 // Nothing here may import a component: this is read by the Payload config.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,21 +39,41 @@ declare module 'payload' {
 
 type Named = Field & { name: string }
 
-/** The fields a record has at its top, seen through what only lays them out: rows, collapsibles and tabs and groups without a name. */
-const flat = (fields: Field[]): Named[] => fields.flatMap((field): Named[] => {
-  if (field.type === 'row' || field.type === 'collapsible') return flat(field.fields)
-  if (field.type === 'tabs') return field.tabs.flatMap(tab => ('name' in tab && tab.name ? [] : flat(tab.fields)))
-  if (field.type === 'group' && !('name' in field && field.name)) return flat(field.fields)
-  return 'name' in field && field.name ? [field as Named] : []
-})
+/** A field with where it is: its path, what it is called with what it is in, whether a record has several of it, and what is beside it. */
+interface Placed { field: Named; path: string; label: Label; rows: boolean; beside: string[] }
 
 const hintOf = (field: Field): FieldHint | undefined => (field as { custom?: { widgets?: FieldHint } }).custom?.widgets
 const saysOf = (collection: CollectionConfig): CollectionHint | undefined => collection.custom?.widgets
 
 /** Kept in the database and meant to be seen: one the admin hides is the project's own bookkeeping. */
-const usable = (field: Named) => {
+const usable = (field: Field) => {
   const { virtual, hidden, admin } = field as { virtual?: unknown; hidden?: unknown; admin?: { hidden?: unknown } }
   return !virtual && hidden !== true && admin?.hidden !== true && hintOf(field) !== false
+}
+
+/** The fields a record has under their names, seen through what only lays them out: rows, collapsibles and tabs and groups without a name. */
+const named = (fields: Field[]): Named[] => fields.flatMap((field): Named[] => {
+  if (field.type === 'row' || field.type === 'collapsible') return named(field.fields)
+  if (field.type === 'tabs') return field.tabs.flatMap(tab => ('name' in tab && tab.name ? [{ ...tab, type: 'group' } as unknown as Named] : named(tab.fields)))
+  if (field.type === 'group' && !('name' in field && field.name)) return named(field.fields)
+  return 'name' in field && field.name ? [field as Named] : []
+})
+
+/**
+ * Every field of a record with where it is: those at its top, and those inside a group, a named tab or the rows of
+ * an array, which are called after both: "Totals: Net". Not what is in the rows of rows, and not what is in blocks.
+ */
+const flat = (fields: Field[], prefix = '', within?: Label, rows = false): Placed[] => {
+  const here = named(fields).filter(usable)
+  const beside = here.map(field => field.name)
+  return here.flatMap((field): Placed[] => {
+    const own = labelled((field as { label?: unknown }).label, field.name)
+    const label = typeof within === 'string' && typeof own === 'string' ? `${within}: ${own}` : own
+    const path = `${prefix}${field.name}`
+    if (field.type === 'group') return flat(field.fields, `${path}.`, label, rows)
+    if (field.type === 'array') return rows ? [] : flat(field.fields, `${path}.`, label, true)
+    return [{ field, path, label, rows, beside }]
+  })
 }
 
 const one = (field: Named): field is Named & { relationTo: string } =>
@@ -59,29 +81,31 @@ const one = (field: Named): field is Named & { relationTo: string } =>
 
 /** A collection as a source, from its fields alone. */
 export const discovered = (collection: CollectionConfig): AnySource => {
-  const fields = flat(collection.fields).filter(usable)
+  const fields = flat(collection.fields)
   const stamped = collection.timestamps !== false
-  const labelOf = (field: Named) => labelled((field as { label?: unknown }).label, field.name)
 
+  // a period goes by a date of the record itself, not by one its rows have
   const dates: Record<string, Label> = {
     ...(stamped ? { createdAt: 'Created', updatedAt: 'Updated' } : {}),
-    ...Object.fromEntries(fields.filter(field => field.type === 'date').map(field => [field.name, labelOf(field)])),
+    ...Object.fromEntries(fields.filter(({ field, rows }) => field.type === 'date' && !rows).map(({ path, label }) => [path, label])),
   }
   const says = saysOf(collection) || {}
   const date = says.date ?? (stamped ? 'createdAt' : Object.keys(dates)[0])
 
   const measures: Record<string, Measure> = { count: count() }
-  for (const field of fields) {
+  for (const { field, path, label, rows, beside } of fields) {
     if (field.type !== 'number' || field.hasMany) continue
     const hint = hintOf(field) || {}
-    measures[field.name] = sum<Loose>(labelOf(field), field.name, hint.format ?? 'number', hint.currency ? { currency: hint.currency } : {})
+    // the currency is the field beside it where there is one of that name, as the hint is written beside it
+    const currency = hint.currency && !rows && path.includes('.') && beside.includes(hint.currency) ? `${path.slice(0, path.lastIndexOf('.') + 1)}${hint.currency}` : hint.currency
+    measures[path] = sum<Loose>(label, path, hint.format ?? 'number', currency ? { currency } : {})
   }
 
   const groups = Object.fromEntries(fields
-    .filter(field => field.type === 'select' || field.type === 'radio' || field.type === 'checkbox' || one(field))
-    .map(field => [field.name, labelOf(field)]))
+    .filter(({ field }) => field.type === 'select' || field.type === 'radio' || field.type === 'checkbox' || one(field))
+    .map(({ path, label }) => [path, label]))
 
-  const scopes = Object.fromEntries(fields.filter(one).map(field => [field.name, (id: number | string): Where => ({ [field.name]: { equals: id } })]))
+  const scopes = Object.fromEntries(fields.filter(({ field, rows }) => one(field) && !rows).map(({ path }) => [path, (id: number | string): Where => ({ [path]: { equals: id } })]))
 
   const title = collection.admin?.useAsTitle && collection.admin.useAsTitle !== 'id' ? collection.admin.useAsTitle : undefined
   const select = [...(title ? [title] : []), ...(date ? [date] : [])]
@@ -100,7 +124,7 @@ export const discovered = (collection: CollectionConfig): AnySource => {
         select, sort: date ? `-${date}` : '-id', empty: 'Nothing here yet',
         row: (doc: Record<string, unknown>, { day, date: dayOf }) => ({
           title: String((title && doc[title]) || `#${doc.id}`),
-          detail: date && typeof doc[date] === 'string' ? day(dayOf(doc[date] as string)) : '',
+          detail: date && typeof at(doc, date) === 'string' ? day(dayOf(at(doc, date) as string)) : '',
         }),
       }),
     },
@@ -113,7 +137,7 @@ export const discovered = (collection: CollectionConfig): AnySource => {
 const merged = (declared: AnySource, found: AnySource): AnySource => {
   // a number that a declared measure already adds up is not offered a second time
   const own = declared.measures as Record<string, Measure>
-  const summed = new Set(Object.values(own).map(measure => ((measure.amount?.how ?? 'sum') === 'sum' ? measure.amount?.select[0] : undefined)).filter(Boolean))
+  const summed = new Set(Object.values(own).map(({ amount }) => ((amount?.how ?? 'sum') === 'sum' ? (amount?.plain ? amount.plain.field : amount?.select[0]) : undefined)).filter(Boolean))
   const sums = Object.fromEntries(Object.entries(found.measures as Record<string, Measure>).filter(([name]) => !summed.has(name)))
   // one declared without saying how it is written is written as its field says
   const written = Object.fromEntries(Object.entries(own).map(([name, measure]) => {

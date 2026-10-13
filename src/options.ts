@@ -1,7 +1,7 @@
 import type { Access, CollectionSlug, Config, Field, Payload, PayloadRequest, Where } from 'payload'
 import { sourcesOf } from './discover'
 import type { Dictionary, Plurals } from './strings'
-import type { AnySource, Doc, Format, Label, Narrowing, Numbers, Period, Reckoned, Source, Vars, View, VIEWS } from './types'
+import type { AnySource, Doc, Fields, Format, Label, Narrowing, Numbers, Period, Reckoned, Source, Vars, View, VIEWS } from './types'
 
 // What the plugin is given by the project that uses it: the sources, the widgets made of them, and how things are
 // said. Everything has a default: without any of it, every collection is a source as its fields describe it.
@@ -101,7 +101,6 @@ const made = (kind: SourceWidget['kind'], slug: string, source: AnySource | stri
   ...(action ? { action } : {}), ...(after ? { after } : {}),
 })
 
-type Fields<S extends CollectionSlug> = keyof Doc<S> & string
 
 type FigureShow<S extends CollectionSlug, F extends string, M extends string> = Common & Slots & Elevated & Narrowed<S, F> & {
   /**

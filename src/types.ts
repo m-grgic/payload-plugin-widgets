@@ -1,7 +1,9 @@
 import type { Access, CollectionSlug, DataFromCollectionSlug, Payload, PayloadRequest, Where, WhereField } from 'payload'
+import { at, isFormula, numberOf, pathsIn, type Formula } from './formula'
 import { combined, counted, countOf, currencyOf, fetched, made, MANY, tallied } from './tally'
 
 export { combined, counted, currencyOf, fetched, MANY }
+export type { Compared, Formula, Test } from './formula'
 
 // What a collection offers to the widgets: the sets of its records worth looking at (filters), what can be told about
 // a set (measures: a count, a sum, or a figure worked out by a function), short lists, and what it can be split by.
@@ -169,8 +171,21 @@ export const selected = (where: Where | undefined | null): Selection => {
   return new Selection([split(where)])
 }
 
-/** The fields of a collection that hold a number. */
-export type Numbers<S extends CollectionSlug> = { [P in keyof Doc<S> & string]: NonNullable<Doc<S>[P]> extends number ? P : never }[keyof Doc<S> & string]
+/** What only holds other fields: a group, or the rows of an array. Not what points elsewhere, which is an id as well, and not blocks. */
+type Holding<T> = [T] extends [readonly (infer Row)[]] ? ([Row] extends [object] ? (Row extends { blockType: unknown } ? never : Row) : never) : [T] extends [object] ? T : never
+
+/** The fields of a record that hold a `Leaf`, by their paths: `total`, `totals.net` in a group, `items.price` in the rows of an array. */
+export type Paths<T, Leaf, Depth extends unknown[] = []> = {
+  [P in keyof T & string]:
+    | (NonNullable<T[P]> extends Leaf ? P : never)
+    | (Depth['length'] extends 2 ? never : Holding<NonNullable<T[P]>> extends infer Inner ? ([Inner] extends [never] ? never : `${P}.${Paths<Inner, Leaf, [...Depth, 0]>}`) : never)
+}[keyof T & string]
+
+/** The fields of a collection that hold a number, the ones inside groups and rows included. */
+export type Numbers<S extends CollectionSlug> = Paths<Doc<S>, number>
+
+/** Every field of a collection by its path. */
+export type Fields<S extends CollectionSlug> = Paths<Doc<S>, unknown>
 
 /**
  * A measure said in place, without declaring it: one of a collection's numbers, or of a source's measures that add
@@ -178,10 +193,12 @@ export type Numbers<S extends CollectionSlug> = { [P in keyof Doc<S> & string]: 
  *
  *   measure: { avg: 'total' }
  *   measure: { max: 'estimatedTime', format: 'hours' }
+ *   measure: { sum: { multiply: ['quantity', 'price'] }, format: 'money' }
  *
+ * In place of a field it takes a formula over several (see `Formula`), which the database can work out as well.
  * How it is written is the field's own (see `FieldHint`) or the measure's where nothing is said here.
  */
-export type Reckoned<N extends string = string> = { [C in Calc]: { [K in C]: N } & { [K in Exclude<Calc, C>]?: never } }[Calc] & {
+export type Reckoned<N extends string = string> = { [C in Calc]: { [K in C]: N | Exclude<Formula<N>, string> } & { [K in Exclude<Calc, C>]?: never } }[Calc] & {
   format?: Format
   /** Where it is money: the field that holds the currency of a record. */
   currency?: string
@@ -245,7 +262,8 @@ export interface Filter<S extends CollectionSlug = Loose> {
 
 /** The number in a record that a sum adds up and a chart draws. */
 export interface Amount<D> {
-  select: (keyof D & string)[]
+  /** The fields it reads, by their paths. */
+  select: ((keyof D & string) | (string & {}))[]
   of: (doc: D) => number
   format: Format
   /** Where it is money: the currency of a record. One that has none counts in the currency the widgets were given. */
@@ -257,10 +275,11 @@ export interface Amount<D> {
   /** Declared without saying how it is written: the field says, where the plugin finds it in the collection. */
   loose?: true
   /**
-   * Where it is no more than what is in a field, or one for every record where no field is named: which field, and
-   * the one that holds its currency. With it the database can do the adding (see ./tally).
+   * Where it is no more than what is in a field, what a formula makes of several, or one for every record where
+   * neither is named; and the field that holds its currency. With it the database can do the adding (see ./tally).
+   * With both, the formula is what a record counts as and the field is the one it stands for.
    */
-  plain?: { field?: string; currency?: string }
+  plain?: { field?: string; formula?: Formula; currency?: string }
 }
 
 /** A measure as a source can declare it in place: `{ avg: 'total', format: 'money', currency: 'currency' }`. */
@@ -311,7 +330,7 @@ export interface Source<
   /** The collection keeps drafts: the admin lists the latest version of each, and so do the widgets. */
   draft?: boolean
   /** The date a period and a chart over time go by; `createdAt` where it is left out. */
-  date?: keyof Doc<S> & string
+  date?: (keyof Doc<S> & string) | (string & {})
   /** The other dates a widget can go by instead, each with what to call it. */
   dates?: Record<string, Label>
   filters: Record<F, Filter<S>>
@@ -344,7 +363,7 @@ export const source = <
   const S extends CollectionSlug,
   F extends string = never, M extends string = never, L extends string = never,
   // the whole of `groups` rather than its names, so that the editor offers the collection's fields for them
-  const G extends Partial<Record<keyof Doc<S> & string, string>> = Record<never, string>, K extends string = never,
+  const G extends Partial<Record<Fields<S>, string>> = Record<never, string>, K extends string = never,
 >(slug: S, definition: {
   /** The collection's own where it is left out. */
   label?: Label
@@ -356,17 +375,18 @@ export const source = <
    */
   discover?: boolean
   draft?: boolean
-  date?: keyof Doc<S> & string
+  date?: Paths<Doc<S>, string>
   /** Each with what it is called; named after its key where that is left out. */
   filters?: Record<F, Omit<Filter<S>, 'label'> & { label?: Label }>
   /**
    * How many there are is always there, as `count`: declare it only to call it something else. One that only makes
-   * one figure of a number field can be said in place: `{ average: { avg: 'total', format: 'money' } }`.
+   * one figure of a number field can be said in place: `{ average: { avg: 'total', format: 'money' } }`, and so can
+   * one worked out of several: `{ value: { sum: { multiply: ['quantity', 'price'] }, format: 'money' } }`.
    */
   measures?: Record<M, Measure<S, NoInfer<F>> | MeasureSpec<S, NoInfer<F>>>
   lists?: Record<L, List<S, NoInfer<F>>>
-  /** The fields it can be split by, each with what to call it: `{ status: 'Status' }`. */
-  groups?: Partial<Record<keyof Doc<S> & string, string>> & G & Record<Exclude<keyof G, keyof Doc<S>>, never>
+  /** The fields it can be split by, each with what to call it: `{ status: 'Status', 'address.country': 'Country' }`. */
+  groups?: Partial<Record<Fields<S>, string>> & G & Record<Exclude<keyof G, Fields<S>>, never>
   scopes?: Record<K, (id: number | string) => Where>
 }): Source<S, F, M | 'count', L, keyof G & string, K> => {
   const filters = Object.fromEntries(Object.entries(definition.filters ?? {}).map(([name, filter]) => [name, { label: worded(name), ...(filter as object) }]))
@@ -423,25 +443,29 @@ export const reckoned = <S extends CollectionSlug = Loose>(label: Label, amount:
 /** What a measure said in place is called where it is given no name: the field, and how it is worked out. */
 export const CALLED: Record<Calc, string> = { sum: '{what}', avg: 'Average {what}', min: 'Lowest {what}', max: 'Highest {what}' }
 
-/** The number a record has in a field, and its currency where another field holds that. */
-export const amountOf = (field: string, format: Format, how: Calc, currency?: string): Amount<Loose> => ({
-  select: [field, ...(currency ? [currency] : [])],
-  of: doc => Number(doc[field]) || 0,
+/**
+ * The number a record has in a field, or what a formula makes of several, and its currency where another field
+ * holds that. A number in the rows of an array is all the rows of a record added up.
+ */
+export const amountOf = (of: Formula, format: Format, how: Calc = 'sum', currency?: string): Amount<Loose> => ({
+  select: [...pathsIn(of), ...(currency ? [currency] : [])],
+  of: doc => numberOf(of, doc),
   format,
   how,
-  plain: { field, ...(currency ? { currency } : {}) },
-  ...(currency ? { currency: doc => (doc[currency] ? String(doc[currency]) : undefined) } : {}),
+  plain: { ...(typeof of === 'string' ? { field: of } : { formula: of }), ...(currency ? { currency } : {}) },
+  ...(currency ? { currency: doc => (at(doc, currency) ? String(at(doc, currency)) : undefined) } : {}),
 })
 
-/** How a measure said in place is worked out, and of what. */
-export const calcOf = (spec: unknown): [Calc, string] | undefined => {
-  const how = spec && typeof spec === 'object' ? CALCS.find(calc => typeof (spec as Record<string, unknown>)[calc] === 'string') : undefined
-  return how ? [how, (spec as Record<Calc, string>)[how]] : undefined
+/** How a measure said in place is worked out, and of what: a field or a measure by its name, or a formula. */
+export const calcOf = (spec: unknown): [Calc, Formula] | undefined => {
+  const how = spec && typeof spec === 'object' ? CALCS.find(calc => typeof (spec as Record<string, unknown>)[calc] === 'string' || isFormula((spec as Record<string, unknown>)[calc])) : undefined
+  return how ? [how, (spec as Record<Calc, Formula>)[how]] : undefined
 }
 
 const declared = (name: string, spec: MeasureSpec): Measure => {
-  const [how, field] = calcOf(spec) ?? ['sum', name]
-  return reckoned(spec.label ?? worded(name), { ...amountOf(field, spec.format ?? 'number', how, spec.currency), ...(spec.format ? {} : { loose: true as const }) }, { filter: spec.filter })
+  const [how, of] = calcOf(spec) ?? ['sum', name]
+  // what is worked out of several fields is written as a number unless it says otherwise
+  return reckoned(spec.label ?? worded(name), { ...amountOf(of, spec.format ?? 'number', how, spec.currency), ...(spec.format || typeof of !== 'string' ? {} : { loose: true as const }) }, { filter: spec.filter })
 }
 
 /** How many there are. What is worth adding comes from the filter, see `Filter.remark`. */
@@ -456,23 +480,28 @@ export const count = (label: Label = 'How many'): Measure<Loose, never> => ({
 })
 
 /** A number field added up: as a figure, and as what a chart draws. */
-export const sum = <S extends CollectionSlug>(label: Label, field: keyof Doc<S> & string, format: Format, more: {
+export const sum = <S extends CollectionSlug>(label: Label, field: Numbers<S>, format: Format, more: {
   currency?: keyof Doc<S> & string
   note?: [string, string]
-  /** Where a record does not simply count as its field: what else to read, and what it counts as. */
+  /**
+   * Where a record does not simply count as its field, what it counts as. A formula (see `Formula`) the database
+   * can work out as well; a function it cannot, so the records are read, with what else it reads named in `select`.
+   */
+  of?: ((doc: Doc<S>) => number) | Exclude<Formula<Numbers<S>>, string>
   select?: (keyof Doc<S> & string)[]
-  of?: (doc: Doc<S>) => number
 } = {}): Measure<S, never> => {
   type D = Doc<S>
+  const { of } = more
+  const plain = amountOf(typeof of === 'function' || of === undefined ? field : of as Formula, format, 'sum', more.currency) as Amount<D>
   const amount: Amount<D> = {
-    select: [field, ...(more.currency ? [more.currency] : []), ...(more.select ?? [])],
-    of: more.of ?? (doc => Number(doc[field]) || 0),
-    format,
-    // counted as its field and nothing else, the database can add it up
-    ...(more.of || more.select ? {} : { plain: { field, ...(more.currency ? { currency: more.currency } : {}) } }),
+    ...plain,
     ...(more.note ? { unit: more.note } : {}),
-    ...(more.currency ? { currency: doc => (doc[more.currency as keyof D] ? String(doc[more.currency as keyof D]) : undefined) } : {}),
+    // what a function makes of a record only reading it tells
+    ...(typeof of === 'function' ? { of, select: [...new Set([field, ...plain.select, ...(more.select ?? [])])], plain: undefined } : {}),
+    ...(typeof of === 'object' ? { select: [...new Set([field, ...plain.select])], plain: { ...plain.plain, field } } : {}),
   }
+  if (!amount.plain) delete amount.plain
+  delete amount.how
   return reckoned<S>(label, amount)
 }
 

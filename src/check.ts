@@ -1,4 +1,5 @@
 import type { FlattenedField, Where } from 'payload'
+import { COMPARISONS, fieldsIn, found as located, pathsOf, wayOf, type Formula } from './formula'
 import { calcOf, VIEWS, type AnySource, type Kind, type Vars, type View } from './types'
 
 // What is wrong with how a widget is set up, said so that it can be put right: the name that is not there and the
@@ -167,23 +168,65 @@ export const whereProblems = (slug: string, fields: FlattenedField[], where: Whe
   })
 }
 
+const isNumber = (field: FlattenedField) => field.type === 'number' && !(field as { hasMany?: boolean }).hasMany
+
+/** Whether every part of a formula is one: a number, a field, or one of the ways there are with what each takes. */
+const wellFormed = (formula: unknown): boolean => {
+  if (typeof formula === 'number') return Number.isFinite(formula)
+  if (typeof formula === 'string') return !!formula
+  const way = wayOf(formula)
+  if (!way) return false
+  const parts = (formula as Record<string, unknown>)[way]
+  if (way === 'when') {
+    const { then, else: otherwise } = formula as { then?: unknown; else?: unknown }
+    return !!parts && typeof parts === 'object' && wellFormed(then) && (otherwise === undefined || wellFormed(otherwise))
+  }
+  return Array.isArray(parts) && parts.every(wellFormed) && (way === 'subtract' || way === 'divide' ? parts.length === 2 : parts.length > 0)
+}
+
+/** What a formula reads that the collection does not have as it needs it: a number that is none, a choice by a field that is not there. */
+export const formulaProblems = (slug: string, fields: FlattenedField[], formula: Formula): Problem[] => {
+  if (!wellFormed(formula)) return [{ text: 'A formula is a number, a number field, or one of add, subtract, multiply, divide, first and when', vars: {} }]
+  const { numbers, tested } = fieldsIn(formula)
+  const offered = pathsOf(fields, isNumber)
+  const every = pathsOf(fields, () => true)
+  const rows = [...new Set([...numbers, ...tested.map(([path]) => path)].map(path => located(fields, path)?.rows).filter((path): path is string => !!path))]
+  return [
+    ...numbers.filter(path => !offered.includes(path)).map(path => missing('{source} has no number called "{name}"', { source: slug, name: path }, offered)),
+    ...tested.flatMap(([path, asked]): Problem[] => {
+      const field = located(fields, path)?.field
+      if (!field) return [missing('{source} has no field called "{name}"', { source: slug, name: path }, every)]
+      return Object.entries(asked ?? {}).flatMap(([how, value]): Problem[] => {
+        if (!(COMPARISONS as readonly string[]).includes(how)) return [missing('"{name}" is not a way to compare {field}', { field: path, name: how }, [...COMPARISONS])]
+        if ((field.type !== 'select' && field.type !== 'radio') || !['equals', 'not_equals', 'in', 'not_in'].includes(how)) return []
+        const choices = field.options.map(option => (typeof option === 'string' ? option : option.value))
+        return [value].flat().filter((one): one is string => typeof one === 'string' && !choices.includes(one))
+          .map(one => missing('{field} has no choice called "{name}": it is one of {choices}', { field: path, name: one, choices: choices.join(', ') }, choices))
+      })
+    }),
+    ...(rows.length > 1 ? [{ text: 'A formula reads the rows of one array, not of "{name}" and of "{other}"', vars: { name: rows[0], other: rows[1] } }] : []),
+  ]
+}
+
 /** A measure said in place that is of nothing the source can make a figure of: neither a number of the collection nor a measure that adds one up. */
 export const measureProblems = (source: AnySource, fields: FlattenedField[], measure: unknown): Problem[] => {
   if (!measure || typeof measure !== 'object') return []
   const found = calcOf(measure)
   if (!found) return [{ text: 'A measure said in place is the sum, avg, min or max of a number', vars: {} }]
   const [, name] = found
+  if (typeof name !== 'string') return formulaProblems(source.slug, fields, name)
   if (source.measures[name]?.amount) return []
-  const numbers = fields.filter(field => field.type === 'number' && !field.hasMany).map(field => field.name)
+  const numbers = pathsOf(fields, isNumber)
   if (numbers.includes(name)) return []
   const measures = Object.keys(source.measures).filter(other => !!source.measures[other].amount)
   return [missing('{source} has no number called "{name}"', { source: source.slug, name }, [...new Set([...numbers, ...measures])])]
 }
 
-/** A date a widget is asked to go by that is not one. */
+/** A date a widget is asked to go by that is not one, or that a record has several of. */
 export const dateProblems = (slug: string, fields: FlattenedField[], date: string | undefined): Problem[] => {
   if (!date) return []
   const field = fieldAt(fields, date)
   if (!field) return [missing('{source} has no field called "{name}"', { source: slug, name: date }, paths(fields))]
+  if (located(fields, date)?.rows) return [{ text: '"{name}" of {source} is in the rows of an array: a period goes by a date of the record itself', vars: { source: slug, name: date } }]
   return typeof field === 'object' && field.type !== 'date' ? [{ text: '"{name}" of {source} is not a date', vars: { source: slug, name: date } }] : []
 }

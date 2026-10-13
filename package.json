@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-widgets",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Payload CMS plugin for dashboard widgets: KPI figures, lists and charts that read from your collections, set up in the config or by whoever is looking.",
   "license": "MIT",
   "author": {

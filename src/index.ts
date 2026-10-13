@@ -1,5 +1,5 @@
 import type { CollectionConfig, CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
-import { dateProblems, elevatedProblems, figureProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
+import { dateProblems, elevatedProblems, figureProblems, formulaProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
 import { forgotten } from './tally'
 import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
@@ -110,8 +110,13 @@ const misfiltered = (settings: Settings, payload: Payload): [string, Problem][] 
 const misdeclared = (settings: Settings, payload: Payload): [string, Problem][] => Object.entries(settings.sources).flatMap(([name, source]) => {
   const fields = payload.collections[source.slug as CollectionSlug]?.config.flattenedFields
   if (!fields) return []
-  return Object.entries(source.filters).flatMap(([filter, { where }]) =>
-    (typeof where === 'function' ? [] : whereProblems(source.slug, fields, where as Where)).map((problem): [string, Problem] => [`${name}.${filter}`, problem]))
+  return [
+    ...Object.entries(source.filters).flatMap(([filter, { where }]) =>
+      (typeof where === 'function' ? [] : whereProblems(source.slug, fields, where as Where)).map((problem): [string, Problem] => [`${name}.${filter}`, problem])),
+    // and of what its measures are worked out of
+    ...Object.entries(source.measures).flatMap(([measure, { amount }]) =>
+      (amount?.plain?.formula === undefined ? [] : formulaProblems(source.slug, fields, amount.plain.formula)).map((problem): [string, Problem] => [`${name}.${measure}`, problem])),
+  ]
 })
 
 /** After the plugins that leave their order open, so the collections they add are sources as well. */

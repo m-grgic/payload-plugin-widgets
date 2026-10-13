@@ -47,6 +47,7 @@ pnpm add payload-plugin-widgets   # or npm install, or yarn add
 - [Languages, time and numbers](#languages-time-and-numbers)
 - [Styling](#styling)
 - [Reference](#reference)
+- [Formulas](#formulas)
 - [Where the adding is done](#where-the-adding-is-done)
 - [Limits](#limits)
 - [Troubleshooting](#troubleshooting)
@@ -125,12 +126,12 @@ editor from your `payload-types.ts`.
 
 ## Setting a widget up on the dashboard
 
-![Setting a figure up in its drawer](./docs/setup.gif)
+![Setting a figure up in its drawer](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/setup.gif)
 
 Anybody signed in can add the three widgets to their own dashboard and say what each shows. What they pick from is
 what they may read: a source that is not for them is not offered.
 
-<img src="./docs/drawer.png" alt="The drawer of a figure" width="520">
+<img src="https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/drawer.png" alt="The drawer of a figure" width="520">
 
 | In the drawer | For | What it says |
 | --- | --- | --- |
@@ -166,7 +167,7 @@ stylesheet), a **source** (a collection's slug, or a [declared source](#declarin
 
 ### Figures
 
-![A figure as a number, as progress and over a sparkline](./docs/figures.png)
+![A figure as a number, as progress and over a sparkline](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/figures.png)
 
 ```ts
 figure('sold', 'orders', {
@@ -182,7 +183,7 @@ figure('sold', 'orders', {
 
 | Option | | |
 | --- | --- | --- |
-| `measure` | `string \| { sum \| avg \| min \| max: field, format?, currency? }` | How many there are where it is left out. A number field by name is added up. Of a declared source, one of its measures by name. |
+| `measure` | `string \| { sum \| avg \| min \| max: field or formula, format?, currency? }` | How many there are where it is left out. A number field by name is added up. Of a declared source, one of its measures by name. |
 | `compare` | `'previous'` | Also read for the period before. Needs a period that has a beginning: not `all`, `past` or `upcoming`, and `custom` only with a `from`. |
 | `goal` | `number` | What the figure is set against, in what the measure counts. |
 | `as` | `'number' \| 'progress' \| 'sparkline'` or a view of your own | `progress` draws how far towards the goal it is, and needs one; `sparkline` what it was over the period. |
@@ -221,7 +222,7 @@ late, offer a link to a new document and a box that adds one by its title.
 
 ### Charts
 
-![The same chart as bars, as columns and as a line](./docs/charts.png)
+![The same chart as bars, as columns and as a line](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/charts.png)
 
 ```ts
 chart('revenue-by-month', 'orders', { label: 'Revenue by month', measure: 'total', by: 'time', period: 'last12', as: 'columns' })
@@ -240,7 +241,7 @@ Over time, a chart is drawn by day up to two months and by month beyond. Each ba
 **Several series.** A chart tells apart either what is in a second field or several measures, each in a colour
 of its own (`--widgets-series-1` to `-6`) and named above it with what it comes to:
 
-![Columns stacked by status, and two measures as two lines](./docs/series.png)
+![Columns stacked by status, and two measures as two lines](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/series.png)
 
 ```ts
 chart('revenue-by-status', 'orders', { label: 'Orders by month and status', measure: 'total', by: 'time', series: 'status', period: 'last12', as: 'columns' })
@@ -305,7 +306,7 @@ A day starts where the `timeZone` option says, a week on the day `weekStartsOn` 
 
 ### When something is not there
 
-![Tiles that say what they were set up with is not there](./docs/notices.png)
+![Tiles that say what they were set up with is not there](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/notices.png)
 
 A source, a filter, a measure or a view that is not there **stops the config from being built**, and says what was
 probably meant:
@@ -350,8 +351,10 @@ From a collection's fields alone, the plugin makes:
 | each `date` field, `createdAt` and `updatedAt` | a date a period can go by; `createdAt` unless said otherwise |
 | the collection's labels and `useAsTitle` | what it and its rows are called |
 
-Fields inside rows, collapsibles, unnamed tabs and unnamed groups are seen through. Virtual fields and fields the
-admin hides are left out. A collection that keeps drafts is read as the admin lists it: the latest version of each.
+Fields inside rows, collapsibles, unnamed tabs and unnamed groups are seen through. Those inside a named group, a
+named tab or the rows of an array are found under their path, and called after both: `totals.net` is "Totals: Net",
+`items.price` is "Items: Price". A date and a scope are only ever the record's own, not its rows'. Virtual fields
+and fields the admin hides are left out. A collection that keeps drafts is read as the admin lists it: the latest version of each.
 
 ### Hints on a collection or a field
 
@@ -424,7 +427,7 @@ widgetsPlugin({
 | `discover` | `false` to have only what is declared here. Otherwise what the plugin finds is there too. |
 | `draft` | The collection keeps drafts: read the latest version of each. |
 | `filters` | Each a `where`, or a function of the [context](#the-context) that gives one, for filters that depend on who is looking. Named after its key where it has no `label`. A `remark` says what is worth saying under the number of them. |
-| `measures` | In place, `{ sum \| avg \| min \| max: 'field', format?, currency?, label?, filter? }`; or one written out (below). `count` is always there. |
+| `measures` | In place, `{ sum \| avg \| min \| max: 'field', format?, currency?, label?, filter? }`, with a [formula](#formulas) where a field is not enough; or one written out (below). `count` is always there. |
 | `lists` | Made with `rows(…)` (below). |
 | `groups` | The fields it can be split by, each with what to call it. |
 | `scopes` | How to narrow it to one of something, by what that is called: `<Chart scope={{ client: id }} />`. |
@@ -440,8 +443,10 @@ import { records, sum } from 'payload-plugin-widgets'
 measures: {
   // a field added up, with what its records are called
   worked: sum('Hours worked', 'minutes', 'hours', { note: ['entry', 'entries'] }),
-  // a record that does not simply count as its field
-  billable: sum('Billable', 'minutes', 'money', { select: ['rate'], of: doc => (doc.minutes / 60) * (doc.rate ?? 0) }),
+  // a record that does not simply count as its field: as a formula, which the database can work out as well
+  billable: sum('Billable', 'minutes', 'money', { of: { multiply: [{ divide: ['minutes', 60] }, 'rate'] } }),
+  // or as a function of the record, which has every record read; `select` names what else it reads
+  rounded: sum('Billed', 'minutes', 'hours', { select: ['step'], of: doc => Math.ceil(doc.minutes / (doc.step || 15)) * (doc.step || 15) }),
   // anything at all: `read` is handed the context, the selection and the source
   oldest: {
     label: 'Oldest open',
@@ -732,7 +737,7 @@ returns nothing for is written as usual.
 
 ## Styling
 
-![The same dashboard in the admin's dark theme](./docs/dashboard-dark.png)
+![The same dashboard in the admin's dark theme](https://raw.githubusercontent.com/m-grgic/payload-plugin-widgets/main/docs/dashboard-dark.png)
 
 The tiles follow the admin's theme by themselves. Their stylesheet is in a cascade layer of its own (`widgets`),
 so **anything a project writes wins without `!important`**, whatever its selector.
@@ -834,17 +839,63 @@ What a filter's function, a measure's `read` and a list's `row` are handed:
 | `t(text, vars?)`, `plural(count, one, many)` | in the language of the request |
 | `number`, `hours(minutes)`, `money(amount, currency)`, `total(perCurrency)`, `day(date)`, `month(date)` | written as that language writes them |
 
+## Formulas
+
+A measure is often not one field but a little arithmetic over several: quantity times price, an amount that counts
+against the total on a credit note, the hours that were billed where they were written down and the hours worked
+where they were not. Wherever a measure names a field it can be given a formula in its place, and on Postgres the
+database works it out, as it does a field:
+
+```ts
+measures: {
+  value: { sum: { multiply: ['quantity', 'price'] }, format: 'money' },
+  margin: { avg: { divide: [{ subtract: ['price', 'cost'] }, 'price'] } },
+  // a credit note counts against what was invoiced
+  invoiced: { sum: { when: { type: { equals: 'creditNote' } }, then: { multiply: ['total', -1] }, else: 'total' }, format: 'money' },
+  // minutes billed, or the minutes worked where none were written down, of what is billable at all
+  billable: { sum: { when: { billable: { equals: true } }, then: { first: ['billedMinutes', 'workedMinutes'] } }, format: 'hours' },
+}
+```
+
+The same goes for one said in place on a widget (`measure: { sum: { multiply: ['quantity', 'price'] } }`) and for
+`sum('Value', 'price', 'money', { of: { multiply: ['quantity', 'price'] } })`.
+
+| A formula is | It comes to |
+| --- | --- |
+| a number, `60` | itself |
+| a number field by its path, `'price'`, `'totals.net'` | what the record has there; nought where it has nothing |
+| `{ add: [a, b, …] }`, `{ multiply: [a, b, …] }` | all of them added, or multiplied |
+| `{ subtract: [a, b] }`, `{ divide: [a, b] }` | one less the other; one by the other, and nought where that is by nought |
+| `{ first: [a, b, …] }` | the first field of them that has something in it, nought counting as something |
+| `{ when: test, then: a, else: b }` | `a` for a record the test holds of, `b` for any other; nought where there is no `else` |
+
+A test is written as a filter is: `{ status: { equals: 'paid' } }`, several fields that all have to hold, and `and`
+and `or` of those. A field is compared with `equals`, `not_equals`, `in`, `not_in`, `exists`, `greater_than`,
+`greater_than_equal`, `less_than` and `less_than_equal`; a relationship by the id it points at. A record with
+nothing in the field equals nothing, is `not_equals` to anything, and is neither greater nor less.
+
+Formulas are typed against the collection's number fields and checked as the config is built: a field that is not
+there, or not a number, or a choice a select does not have, is said with what was probably meant.
+
+**In the rows of an array** a formula is worked out for each row, and a record counts as its rows added up:
+`{ sum: { multiply: ['items.quantity', 'items.price'] } }` is the value of everything ordered. Split by a field
+of the same rows (`by: 'items.kind'`) it is the rows under each. A formula reads the rows of one array, with
+whatever it likes of the record around them. These are read record by record: see below.
+
 ## Where the adding is done
 
-**On Postgres, by the database.** A sum, an average, a lowest, a highest and every chart of a field are one query
-that groups and adds, however many records there are. The query is built by Payload the way it builds one to
+**On Postgres, by the database.** A sum, an average, a lowest, a highest and every chart of a field or of a
+[formula](#formulas) are one query that groups and adds, however many records there are. A field inside a named
+group or a named tab is a column like any other. The query is built by Payload the way it builds one to
 count, with the collection's `access` for whoever asks (or without, under `overrideAccess`), so it comes to what
 reading the records would.
 
 **Anywhere else, record by record**, at most 5,000 of them, with a tile that says so beyond that. That is MongoDB
 and SQLite, and on Postgres whatever the database does not hold just as a record shows it:
 
-- a measure worked out by a function (`sum(…, { of })`, or a `read` of your own),
+- a measure worked out by a function (`sum(…, { of: doc => … })`, or a `read` of your own): say it as a
+  [formula](#formulas) where it can be,
+- a number or a group in the rows of an array,
 - a field with `access.read` or an `afterRead` hook, a virtual or a localized one, one that holds several
   (`hasMany`), and any field of a collection that has an `afterRead` hook of its own,
 - a collection read with its drafts (`draft: true` on its source).
@@ -872,8 +923,9 @@ not hear of a change made through another before the seconds are up.
 - A chart of money is drawn in one currency, the one the plugin was given; records in another are left out, and
   the tile says how many. A figure of money says each currency's total.
 - A list is drawn as rows; another way only by a view of your own.
-- Groups, measures and dates are a collection's own top-level fields: nothing inside a named group, an array or a
-  block is found. A relationship to more than one collection is not a group.
+- Nothing inside a block is found, and nothing in the rows of rows. What is in the rows of an array is read
+  record by record, and a period cannot go by a date there. A relationship to more than one collection is not a
+  group.
 - A tile is read when the page is, unless the plugin is given a `cache`: see [Where the adding is done](#where-the-adding-is-done).
 
 ## Troubleshooting
@@ -910,7 +962,7 @@ See [`dev/README.md`](./dev/README.md).
 
 ```sh
 pnpm typecheck   # the source, strictly
-pnpm test        # node --test, no database needed
+pnpm test        # node --test; with DATABASE_URI also against a Postgres, which it empties first
 pnpm build       # dist: JavaScript, types and the stylesheet
 pnpm dev         # the demo
 ```
@@ -919,7 +971,12 @@ pnpm dev         # the demo
   read by Node as it is.
 - Nothing the Payload config reads (`src/index.ts` and what it imports) may import a component.
 - Everything a tile says is in `src/strings.ts`; a test fails where one is said that is not listed there.
-- Publish with `pnpm publish`: it is pnpm that points the package's entries at `dist` (`publishConfig`).
+- What the database adds up is compared with what the records come to in `test/database.test.ts`, which runs
+  where `DATABASE_URI` names a Postgres that may be emptied, as it does in CI.
+- A release is a tag: `v1.2.3` on a commit whose `package.json` says `1.2.3` is checked, built and published by
+  `.github/workflows/release.yml`, which npm trusts as the package's publisher, so no token is kept anywhere. By
+  hand it is `pnpm pack` and `npm publish` of the tarball: pnpm points the package's entries at `dist`
+  (`publishConfig`), and npm sends the README along.
 
 Issues and pull requests are welcome. See the [changelog](./CHANGELOG.md) for what changed.
 

@@ -1,8 +1,9 @@
-import type { Access, CollectionSlug, FlattenedField, Where } from 'payload'
+import type { Access, CollectionSlug, Where } from 'payload'
 import { dateProblems, figureProblems, measureProblems, seriesProblems, Misconfigured, nameProblems, noSource, Unavailable, isDate, whereProblems, type Problem } from './check'
 import { accessTo, readable, sourceCalled } from './options'
 import { after } from './time'
 import { months, timed as atMoments } from './when'
+import { fieldsIn, found as located } from './formula'
 import { countOf, made, tallied, type Cell, type Dim } from './tally'
 import { amountOf, CALLED, calcOf, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
 
@@ -143,11 +144,14 @@ const measureOf = (context: Context, source: AnySource, picked: Measured | undef
   if (typeof picked !== 'object' || !picked) return source.measures[picked ?? 'count']
   const found = calcOf(picked)
   if (!found) return undefined
-  const [how, name] = found
+  const [how, of] = found
   const called = (label: Label) => (how === 'sum' ? label : context.t(CALLED[how], { what: context.t(label).toLowerCase() }))
-  const base = source.measures[name] as Measure | undefined
+  // what is worked out of several fields is named after the first of them
+  const name = typeof of === 'string' ? of : fieldsIn(of).numbers[0] ?? ''
+  const base = typeof of === 'string' ? source.measures[name] as Measure | undefined : undefined
   if (base?.amount) return reckoned(called(base.label), { ...base.amount, how, format: picked.format ?? base.amount.format }, { filter: base.filter })
-  const field = fieldsOf(context, source).find(candidate => candidate.name === name)
+  const field = located(fieldsOf(context, source), name)?.field
+  if (typeof of !== 'string') return reckoned(called(field ? labelled(field.label, field.name) : nameOf(context.payload, source)), amountOf(of, picked.format ?? 'number', how, picked.currency))
   if (field?.type !== 'number') return undefined
   const hint = (field.custom?.widgets || {}) as { format?: Format; currency?: string }
   return reckoned(called(labelled(field.label, name)), amountOf(name, picked.format ?? hint.format ?? 'number', how, picked.currency ?? hint.currency))
@@ -286,7 +290,7 @@ const text = (label: unknown, context: Context) =>
 /** What the values of a field are called: the labels of a select's options, the titles of what a relationship points at. */
 const called = async (context: Context, source: AnySource, field: string, keys: string[]) => {
   const names = new Map<string, string>()
-  const config = context.payload.collections[source.slug as CollectionSlug].config.flattenedFields.find((candidate: FlattenedField) => candidate.name === field)
+  const config = located(context.payload.collections[source.slug as CollectionSlug].config.flattenedFields, field)?.field
   if (config?.type === 'select' || config?.type === 'radio') {
     for (const option of config.options) {
       if (typeof option === 'string') names.set(option, context.t(option))
@@ -395,12 +399,14 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     for (const cell of cells) each.set(cell.keys[heading], [...(each.get(cell.keys[heading]) ?? []), cell])
     return each
   }
-  const ranked = (cells: Cell[]) => [...under(cells, 0)].map(([key, mine]) => [key, made(first.amount.how, mine)] as const).sort((a, b) => b[1] - a[1])
+  const ranked = (cells: Cell[]) => [...under(cells, 0)].map(([key, mine]) => [key, made(first.amount.how, mine)] as const)
+    // the most first, and of two that come to the same the one that is first by name, however they were read
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
 
   // what is drawn at once: the measures, or the records of the one measure told apart by what they have in a field.
   // `cells` are what each comes to bar by bar.
   let parts = all.map((one, index) => ({
-    key: typeof picked[index] === 'string' ? picked[index] as string : calcOf(picked[index])?.join('-') ?? 'count',
+    key: typeof picked[index] === 'string' ? picked[index] as string : calcOf(picked[index])?.map(part => (typeof part === 'string' ? part : `formula-${index + 1}`)).join('-') ?? 'count',
     label: context.t(one.measure.label), total: one.total, cells: one.over(0), amount: one.amount, show: one.show,
   }))
   if (apart) {

@@ -3,6 +3,31 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.5.0
+
+Measures worked out of several fields, and fields inside groups and rows.
+
+- **Added:** formulas. A measure can be a little arithmetic over fields in place of one field, and a choice
+  between two by what the record has: `{ sum: { multiply: ['quantity', 'price'] } }`,
+  `{ sum: { when: { type: { equals: 'creditNote' } }, then: { multiply: ['total', -1] }, else: 'total' } }`. It is
+  taken wherever a measure names a field, typed and checked as the config is built, and on Postgres worked out by
+  the database, so a measure that had to be a function to say this no longer has every record read.
+  `sum(…, { of })` takes one too.
+- **Added:** fields inside a named group, a named tab and the rows of an array are found, and named by their
+  path: `totals.net`, `items.price`. They can be measures and groups, and those in a group or a tab dates and
+  scopes as well. A number in rows is all the rows of a record added up, and split by a field of the same rows
+  it is the rows under each. On Postgres what is in a group or a tab is added up by the database; what is in
+  rows is read record by record. Blocks are still not looked into.
+- **Changed:** a collection with such fields offers more than it did: a number in a group is a new measure in
+  the drawer, under the name "Group: Field". `custom: { widgets: false }` on a field or its group leaves it out.
+- **Fixed:** a sum or an average added up from records no longer shows what adding fractions leaves behind
+  (2445.6299999999997 for 2445.63), and comes to what the database says to the last digit.
+- **Fixed:** two bars of a chart that come to the same are in the same order every time, the first by name
+  first; before, it depended on the order the records were read in.
+- **Fixed:** in the package's page on npm: it is now published in a way that sends the README along.
+- The package: what the database adds up is compared with what the records come to against a real Postgres in
+  CI, and a version is published by tagging it (`.github/workflows/release.yml`, with npm's trusted publishing).
+
 ## 0.4.0
 
 Sums without a ceiling on Postgres, and reads that can be kept.

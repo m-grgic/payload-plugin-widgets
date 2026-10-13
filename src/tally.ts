@@ -1,11 +1,13 @@
 import { combineQueries, executeAccess, validateQueryPaths, type CollectionSlug, type FlattenedField, type Where } from 'payload'
+import { at, found, pieces, valuesAt, type Compared, type Formula, type Test } from './formula'
 import type { Amount, AnySource, Calc, Context, Selection } from './types'
 
 // Where the numbers come from. A measure that is no more than a field is added up by the database, where that is
 // Postgres: the query is built by Payload as it builds one to count, with the access of whoever asks, so it comes
-// to what reading every record would. Anything else is read record by record, at most MANY of them: a measure
-// worked out by a function, a field the database does not hold as it is shown, a collection with drafts, any other
-// database. Either way what comes back is the same: what the records under each heading come to.
+// to what reading every record would. So is one worked out by a formula (see ./formula). Anything else is read
+// record by record, at most MANY of them: a measure worked out by a function, a number in the rows of an array, a
+// field the database does not hold as it is shown, a collection with drafts, any other database. Either way what
+// comes back is the same: what the records under each heading come to.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any
@@ -26,13 +28,16 @@ export interface Tally {
   cut: boolean
 }
 
+/** What adding fractions up leaves behind is taken off: 2445.6299999999997 is 2445.63. */
+export const even = (value: number) => (Number.isFinite(value) && Math.abs(value) < 1e11 ? Number(value.toFixed(10)) : value)
+
 /** Many numbers as one: added up unless said otherwise. Nothing counts as nought. */
 export const combined = (how: Calc | undefined, values: number[]) => {
   if (!values.length) return 0
   if (how === 'min') return values.reduce((least, value) => Math.min(least, value))
   if (how === 'max') return values.reduce((most, value) => Math.max(most, value))
   const total = values.reduce((sum, value) => sum + value, 0)
-  return how === 'avg' ? total / values.length : total
+  return even(how === 'avg' ? total / values.length : total)
 }
 
 /** The same of what was already added up: the average of all the records, not of the averages. */
@@ -42,7 +47,7 @@ export const made = (how: Calc | undefined, cells: Cell[]) => {
   if (how === 'min') return Math.min(...cells.filter(cell => cell.count).map(cell => cell.min))
   if (how === 'max') return Math.max(...cells.filter(cell => cell.count).map(cell => cell.max))
   const total = cells.reduce((sum, cell) => sum + cell.sum, 0)
-  return how === 'avg' ? total / count : total
+  return even(how === 'avg' ? total / count : total)
 }
 
 /** How many records there are in them. */
@@ -97,6 +102,21 @@ export const forgotten = (slug: string) => {
   for (const name of store.keys()) if (name.startsWith(mine)) store.delete(name)
 }
 
+/** Fields by their paths as Payload is asked for them: `items.price` as `{ items: { price: true } }`. */
+const asked = (paths: string[]) => {
+  const all: Record<string, unknown> = {}
+  for (const path of paths) {
+    let within = all
+    const segments = path.split('.')
+    for (const [index, segment] of segments.entries()) {
+      if (within[segment] === true) break
+      if (index === segments.length - 1) within[segment] = true
+      else within = (within[segment] ??= {}) as Record<string, unknown>
+    }
+  }
+  return all
+}
+
 /** Every record of a selection with only the fields asked for, whatever the source. */
 export const fetched = async <D>(context: Context, from: AnySource, selection: Selection, select: string[], more: { limit?: number; sort?: string } = {}): Promise<D[]> => {
   const read = async (): Promise<D[]> => {
@@ -105,7 +125,7 @@ export const fetched = async <D>(context: Context, from: AnySource, selection: S
       ...context.as, collection: from.slug, where: selection.where, pagination: false, limit: more.limit ?? MANY,
       ...(more.sort ? { sort: more.sort } : {}),
       ...(from.draft ? { draft: true } : {}),
-      ...(select.length ? { select: Object.fromEntries(select.map(field => [field, true])) } : {}),
+      ...(select.length ? { select: asked(select) } : {}),
     })
     return docs
   }
@@ -119,35 +139,120 @@ export const counted = (context: Context, from: AnySource, selection: Selection)
     ? fetched(context, from, selection, []).then(docs => docs.length)
     : remembered(context, from, ['count', selection.where], async () => (await (context.payload.count as Loose)({ ...context.as, collection: from.slug, where: selection.where })).totalDocs)
 
-/** The values a record has in a field, as text: what it points at by its id, and one of nothing where it has none. */
-export const valuesOf = (doc: Record<string, unknown>, field: string): string[] => {
-  const value = doc[field]
-  const keys = (Array.isArray(value) ? value : [value]).filter(key => key !== null && key !== undefined && key !== '')
-  return keys.length ? keys.map(key => (typeof key === 'object' ? String((key as { id: unknown }).id) : String(key))) : ['']
+/** The values a record has in a field, as text and each once: what it points at by its id, and one of nothing where it has none. */
+export const valuesOf = (doc: unknown, field: string): string[] => {
+  const keys = valuesAt(doc, field).filter(key => key !== null && key !== undefined && key !== '')
+  return keys.length ? [...new Set(keys.map(key => (typeof key === 'object' ? String((key as { id: unknown }).id) : String(key))))] : ['']
 }
 
-const keysOf = (context: Context, dim: Dim, doc: Record<string, unknown>) =>
-  'field' in dim ? valuesOf(doc, dim.field) : [typeof doc[dim.date] === 'string' ? context.date(doc[dim.date] as string).slice(0, dim.daily ? 10 : 7) : '']
+const keysOf = (context: Context, dim: Dim, doc: unknown, path = 'field' in dim ? dim.field : dim.date) => {
+  if ('field' in dim) return valuesOf(doc, path)
+  const value = at(doc, path)
+  return [typeof value === 'string' ? context.date(value).slice(0, dim.daily ? 10 : 7) : '']
+}
 
 /** Every way of taking one of each. */
 const crossed = (lists: string[][]): string[][] => lists.reduce<string[][]>((before, list) => before.flatMap(keys => list.map(key => [...keys, key])), [[]])
 
-/** Records added up one by one. One that has several of what it is told apart by counts under each. */
-const fromRecords = <D>(context: Context, docs: D[], amount: Amount<D>, dims: Dim[]): Tally => ({
-  cut: docs.length >= MANY,
-  over: (...which) => merged(docs.flatMap(doc => {
-    const value = amount.of(doc)
-    const currency = amount.format === 'money' ? currencyOf(context, amount, doc) : ''
-    return crossed(which.map(index => keysOf(context, dims[index], doc as Record<string, unknown>))).map(keys => ({ keys, currency, count: 1, sum: value, min: value, max: value }))
-  })),
-})
+/**
+ * Records added up one by one. One that has several of what it is told apart by counts under each. One whose number
+ * is in the rows of an array counts as what its rows come to; told apart by what the rows themselves have, as what
+ * the rows under each come to.
+ */
+const fromRecords = <D>(context: Context, docs: D[], amount: Amount<D>, dims: Dim[]): Tally => {
+  const formula = amount.plain?.formula ?? amount.plain?.field
+  return {
+    cut: docs.length >= MANY,
+    over: (...which) => merged(docs.flatMap(doc => {
+      const currency = amount.format === 'money' ? currencyOf(context, amount, doc) : ''
+      const cell = (keys: string[], value: number): Cell => ({ keys, currency, count: 1, sum: value, min: value, max: value })
+      const { rows, list } = formula === undefined ? { rows: undefined, list: [{ value: amount.of(doc), row: undefined }] } : pieces(formula, doc)
+      if (!rows) return crossed(which.map(index => keysOf(context, dims[index], doc))).map(keys => cell(keys, list.reduce((sum, piece) => sum + piece.value, 0)))
+      const inside = `${rows}.`
+      const each = new Map<string, Cell>()
+      for (const { row, value } of list) {
+        const lists = which.map(index => {
+          const dim = dims[index]
+          const path = 'field' in dim ? dim.field : dim.date
+          return path.startsWith(inside) ? keysOf(context, dim, row, path.slice(inside.length)) : keysOf(context, dim, doc)
+        })
+        for (const keys of crossed(lists)) {
+          const name = JSON.stringify(keys)
+          each.set(name, cell(keys, (each.get(name)?.sum ?? 0) + value))
+        }
+      }
+      return [...each.values()]
+    })),
+  }
+}
+
+/** Not something the database can be asked. */
+class Unplain extends Error {}
+
+const NUMBERS = ['number']
+const TESTED = ['select', 'radio', 'checkbox', 'text', 'number', 'relationship', 'upload']
+
+/** A formula as the database works it out, to the same as `worked` in ./formula does of a record. */
+const written = (sql: Loose, formula: Formula, column: (path: string, types: string[]) => Loose): Loose => {
+  const need = (path: string, types: string[]) => {
+    const found = column(path, types)
+    if (!found) throw new Unplain()
+    return found
+  }
+  const listed = (values: unknown) => {
+    if (!Array.isArray(values)) throw new Unplain()
+    return sql.join(values.map(value => sql`${value}`), sql`, `)
+  }
+  const compared = (path: string, asked: Compared): Loose[] => {
+    const held = need(path, TESTED)
+    return Object.entries(asked ?? {}).map(([how, value]) => {
+      if (how === 'equals') return sql`${held} = ${value}`
+      if (how === 'not_equals') return sql`${held} is distinct from ${value}`
+      if (how === 'in') return (value as unknown[]).length ? sql`${held} in (${listed(value)})` : sql.raw('false')
+      if (how === 'not_in') return (value as unknown[]).length ? sql`(${held} is null or ${held} not in (${listed(value)}))` : sql.raw('true')
+      if (how === 'exists') return value ? sql`${held} is not null` : sql`${held} is null`
+      if (how === 'greater_than') return sql`${held} > ${value}`
+      if (how === 'greater_than_equal') return sql`${held} >= ${value}`
+      if (how === 'less_than') return sql`${held} < ${value}`
+      if (how === 'less_than_equal') return sql`${held} <= ${value}`
+      throw new Unplain()
+    })
+  }
+  const all = (parts: Loose[], word: 'and' | 'or') => (parts.length ? sql`(${sql.join(parts, sql.raw(` ${word} `))})` : sql.raw(word === 'and' ? 'true' : 'false'))
+  const tested = (test: Test): Loose => all(Object.entries(test ?? {}).flatMap(([key, value]): Loose[] => {
+    if (key === 'and' || key === 'or') return [all((value as Test[]).map(tested), key)]
+    return compared(key, value as Compared)
+  }), 'and')
+  const literal = (value: number) => {
+    if (!Number.isFinite(value)) throw new Unplain()
+    return sql.raw(`(${value})::numeric`)
+  }
+  const of = (part: Formula): Loose => {
+    if (typeof part === 'number') return literal(part)
+    if (typeof part === 'string') return sql`coalesce(${need(part, NUMBERS)}, 0)`
+    if ('add' in part) return part.add.length ? sql`(${sql.join(part.add.map(of), sql.raw(' + '))})` : literal(0)
+    if ('multiply' in part) return part.multiply.length ? sql`(${sql.join(part.multiply.map(of), sql.raw(' * '))})` : literal(1)
+    if ('subtract' in part) return sql`(${of(part.subtract[0])} - ${of(part.subtract[1])})`
+    if ('divide' in part) return sql`(case when ${of(part.divide[1])} = 0 then 0 else ${of(part.divide[0])} / ${of(part.divide[1])} end)`
+    // a field as it is, so that one with nothing in it is passed over
+    if ('first' in part) return sql`coalesce(${sql.join([...part.first.map(one => (typeof one === 'string' ? need(one, NUMBERS) : of(one))), literal(0)], sql.raw(', '))})`
+    if ('when' in part) return sql`(case when ${tested(part.when)} then ${of(part.then)} else ${part.else === undefined ? literal(0) : of(part.else)} end)`
+    throw new Unplain()
+  }
+  return of(formula)
+}
 
 /** A column the database holds just as a record shows it: not worked out on the way, and not kept from anybody. */
-const columnOf = (fields: FlattenedField[], table: Loose, name: string, types: string[]) => {
-  const field = fields.find(candidate => candidate.name === name) as Loose
-  if (!field || !types.includes(field.type) || field.localized || field.virtual || field.hasMany || field.access?.read || field.hooks?.afterRead?.length) return undefined
+const columnOf = (fields: FlattenedField[], table: Loose, path: string, types: string[]) => {
+  const where = found(fields, path)
+  const field = where?.field as Loose
+  // what is in the rows of an array is in a table of its own
+  if (!where || where.rows || !types.includes(field.type) || field.hasMany) return undefined
+  // neither the field nor a group it is in
+  if (where.way.some((one: Loose) => one.localized || one.virtual || one.access?.read || one.hooks?.afterRead?.length)) return undefined
   if ((field.type === 'relationship' || field.type === 'upload') && typeof field.relationTo !== 'string') return undefined
-  return table[name]
+  // a field in a group is a column named after both
+  return table[path.split('.').join('_')]
 }
 
 // the tag raw SQL is written with comes from the adapter's own package, which the project has and this one does not
@@ -171,10 +276,10 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
   const table = adapter.tables[adapter.tableNameMap?.get(snake(config.slug))]
   if (!table?.id) return undefined
   const fields = config.flattenedFields
-  const number = plain.field ? columnOf(fields, table, plain.field, ['number']) : undefined
+  const formula = plain.formula ?? plain.field
   const currency = plain.currency && amount.format === 'money' ? columnOf(fields, table, plain.currency, ['text', 'select', 'radio']) : undefined
   const columns = dims.map(dim => ('field' in dim ? columnOf(fields, table, dim.field, ['select', 'radio', 'checkbox', 'relationship', 'upload', 'text']) : columnOf(fields, table, dim.date, ['date'])))
-  if ((plain.field && !number) || (plain.currency && amount.format === 'money' && !currency) || columns.some(column => !column)) return undefined
+  if ((plain.currency && amount.format === 'money' && !currency) || columns.some(column => !column)) return undefined
   const sql = await tagOf(adapter.packageName)
   if (!sql) {
     if (!told.has('')) payload.logger.warn(`widgets: ${adapter.packageName} could not be loaded to add up in the database, so records are read instead`)
@@ -196,7 +301,13 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
   if (currency) picked.currency = currency
   const headings = Object.keys(picked).length
   // a record without the number counts as nought, as it does when it is read
-  const value = number ? sql`coalesce(${number}, 0)` : sql`1`
+  let value: Loose
+  try {
+    value = formula === undefined ? sql`1` : written(sql, formula, (path, types) => columnOf(fields, table, path, types))
+  } catch (error) {
+    if (error instanceof Unplain) return undefined
+    throw error
+  }
   Object.assign(picked, { count: sql`count(*)`, sum: sql`sum(${value})`, min: sql`min(${value})`, max: sql`max(${value})` })
 
   try {

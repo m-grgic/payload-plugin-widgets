@@ -1,0 +1,55 @@
+name: Release
+
+# A tag v1.2.3 on a commit whose package.json says 1.2.3 is checked, built and published to npm.
+# Nothing is kept secret here: npm trusts this workflow of this repository (a "trusted publisher", set up once
+# under the package's settings on npmjs.com), so there is no token to store or to leak.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: widgets_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URI: postgres://postgres:postgres@127.0.0.1:5432/widgets_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      # trusted publishing needs npm 11.5.1 or later, which Node 24 brings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, but package.json says $version"
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      # packed by pnpm, which points the exports at dist; published by npm, which sends the README along
+      - run: pnpm pack --pack-destination "$RUNNER_TEMP"
+      - run: npm publish "$RUNNER_TEMP"/payload-plugin-widgets-*.tgz --access public --ignore-scripts
