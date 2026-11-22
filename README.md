@@ -62,11 +62,11 @@ pnpm add payload-plugin-widgets   # or npm install, or yarn add
 | Payload | 3.90 or later (the modular dashboard) |
 | Next.js | what your Payload supports; developed on 16.3 |
 | React | 19 |
-| Node | 18.20.2, or 20.9 and later |
+| Node | 20.9 or later |
 | Database | any Payload adapter |
 
-Developed and tested with Payload 3.90.2, Next.js 16.3.8 and React 19.3 on Postgres. Next.js 15 is allowed by the
-peer range as Payload allows it, and has not been tried.
+Developed with Payload 3.90.2, Next.js 16 and React 19.3 on Postgres. The tests run on Payload 3.90.0 and the
+latest 3.x, on Next.js 15.4 and 16, and on Node 22 and 24.
 
 ## Install
 

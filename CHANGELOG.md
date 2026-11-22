@@ -3,6 +3,43 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.5.1
+
+Figures that were wrong in some cases, charts a keyboard and a screen reader can use, and a package that is
+tested on more than one version.
+
+- **Fixed:** where the database does not add up for the widgets (MongoDB, SQLite, collections with drafts,
+  `sums: 'records'`), records are now read with the request itself and its locale. An access function that
+  reads headers, cookies or `req.context`, and a localized field, give what they give on Postgres.
+- **Fixed:** an average, a lowest and a highest of a field pass over records where the field is empty; before,
+  each counted as 0, so "Lowest price" showed 0. Their "N records" note counts the records that have a value.
+  Sums and formulas are as they were.
+- **Fixed:** "the last 30 days" was 31 days, and so was the period before it compares with.
+- **Fixed:** the start of a day was an hour off on the days the clocks change in zones far east of UTC
+  (Sydney, Auckland), and with it "today" and the start of a period.
+- **Fixed:** a count on a collection with drafts stopped at 5,000; it is now the real number. A sum or a chart
+  there still reads at most 5,000 records, and says so.
+- **Fixed:** "Only the first 5,000" was shown when there were exactly 5,000 records.
+- **Fixed:** with `cache`, what is kept is the figures, not the records they were added up from, which could
+  come to a great deal of memory. A measure of your own that calls `records()` is no longer served from the
+  cache.
+- **Fixed:** a chart drawn as a line keeps its links: each point can be clicked or tabbed to. The columns of a
+  chart are announced with their label and value.
+- **Changed:** a tile that cannot show its figure (an error, not for this account, not set up yet) looks
+  different from one that can: a dashed border and an icon for each case. `Notice` takes an optional `kind`.
+- **Changed:** a figure drawn as progress without a goal is refused in the drawer when saved, in place of an
+  error tile afterwards.
+- **Changed:** a tile that wants attention says so to a screen reader, and a compared figure has ▲ or ▼ beside
+  its change. Two new strings to translate: "Needs attention", "Urgent".
+- **Changed:** Node 18 is no longer supported: `engines` is `>=20.9.0`.
+- On a database other than Postgres the plugin says once, as Payload starts, that sums and charts are worked
+  out from at most 5,000 records.
+- The package: the types no longer import the stylesheet, which failed for projects that check library types;
+  `./package.json` is exported.
+- The package: the tests run on Payload 3.90.0 and the latest 3.x, Next.js 15.4 and 16, Node 22 and 24, and
+  the packed tarball is checked with publint and arethetypeswrong. A release makes a GitHub Release out of
+  this file. `SECURITY.md`, `CONTRIBUTING.md` and an issue form.
+
 ## 0.5.0
 
 Measures worked out of several fields, and fields inside groups and rows.

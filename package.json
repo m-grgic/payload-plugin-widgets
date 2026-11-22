@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-widgets",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Payload CMS plugin for dashboard widgets: KPI figures, lists and charts that read from your collections, set up in the config or by whoever is looking.",
   "license": "MIT",
   "author": {
@@ -74,7 +74,8 @@
       "types": "./src/exports/client.ts",
       "default": "./src/exports/client.ts"
     },
-    "./widgets.css": "./src/widgets.css"
+    "./widgets.css": "./src/widgets.css",
+    "./package.json": "./package.json"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -92,7 +93,8 @@
         "types": "./dist/exports/client.d.ts",
         "default": "./dist/exports/client.js"
       },
-      "./widgets.css": "./dist/widgets.css"
+      "./widgets.css": "./dist/widgets.css",
+      "./package.json": "./package.json"
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -128,7 +130,7 @@
     "typescript": "^5.9.3"
   },
   "engines": {
-    "node": "^18.20.2 || >=20.9.0"
+    "node": ">=20.9.0"
   },
   "packageManager": "pnpm@11.5.0"
 }
