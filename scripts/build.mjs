@@ -31,6 +31,9 @@ const full = (from, specifier) => {
 
 for (const file of files(dist).filter(path => /\.(js|d\.ts)$/.test(path))) {
   const before = readFileSync(file, 'utf8')
-  const after = before.replace(/(\bfrom\s*|\bimport\s*\(?\s*)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g, (_, lead, quote, specifier) => `${lead}${quote}${full(file, specifier)}${quote}`)
+  let after = before.replace(/(\bfrom\s*|\bimport\s*\(?\s*)(['"])(\.{1,2}(?:\/[^'"]*)?)\2/g, (_, lead, quote, specifier) => `${lead}${quote}${full(file, specifier)}${quote}`)
+  // tsc keeps `import './widgets.css'` in the types too, where there is nothing for it to name: a consumer that
+  // checks the types of its libraries (skipLibCheck: false) fails on it. The JavaScript keeps it; the types drop it.
+  if (file.endsWith('.d.ts')) after = after.replace(/^\s*import\s*(['"])[^'"]+\.css\1\s*;?[^\S\n]*\n?/gm, '')
   if (after !== before) writeFileSync(file, after)
 }

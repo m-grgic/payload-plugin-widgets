@@ -3,13 +3,15 @@ name: Release
 # A tag v1.2.3 on a commit whose package.json says 1.2.3 is checked, built and published to npm.
 # Nothing is kept secret here: npm trusts this workflow of this repository (a "trusted publisher", set up once
 # under the package's settings on npmjs.com), so there is no token to store or to leak.
+# Once it is on npm, the tag gets a GitHub release whose notes are what CHANGELOG.md says under that version.
 
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: read
+  # write: the GitHub release is made with this workflow's own token
+  contents: write
   id-token: write
 
 jobs:
@@ -46,6 +48,19 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME, but package.json says $version"
             exit 1
           fi
+      # a version the changelog says nothing about is not published; what it says is kept for the release
+      - name: The changelog has the version
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          # from the line after "## 1.2.3" to the next "## "
+          awk -v version="$version" '
+            /^## / { if (found) exit; sub(/^## +\[?v?/, ""); split($0, words, /[] ]/); found = words[1] == version; next }
+            found
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q "[^[:space:]]" "$RUNNER_TEMP/notes.md"; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
@@ -53,3 +68,7 @@ jobs:
       # packed by pnpm, which points the exports at dist; published by npm, which sends the README along
       - run: pnpm pack --pack-destination "$RUNNER_TEMP"
       - run: npm publish "$RUNNER_TEMP"/payload-plugin-widgets-*.tgz --access public --ignore-scripts
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

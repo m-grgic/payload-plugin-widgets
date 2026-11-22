@@ -7,7 +7,23 @@ on:
 
 jobs:
   check:
+    name: Node ${{ matrix.node }}, Next ${{ matrix.next }}, Payload ${{ matrix.payload }}
     runs-on: ubuntu-latest
+    strategy:
+      # one combination failing says nothing about the others, so each runs to the end
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+        # Next 14 is out: @payloadcms/next 3.90 asks for 15.2.9-15.2.x, 15.3.9-15.3.x, 15.4.11-15.4.x or 16.3.3-16.x.
+        # 15 is the newest 15 Payload allows; 16 is from 16.4.5, the lowest the newest Payload 3 allows.
+        next: ['~15.4.11', '^16.4.5']
+        # the lowest Payload the peer range admits, and the newest 3
+        payload: ['3.90.0', '^3']
+        include:
+          # what a contributor gets from pnpm install: the versions in pnpm-lock.yaml, as they are
+          - node: 22
+            next: lockfile
+            payload: lockfile
     # what the database adds up is compared with what the records come to (test/database.test.ts)
     services:
       postgres:
@@ -29,9 +45,82 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - if: matrix.payload == 'lockfile'
+        run: pnpm install --frozen-lockfile
+      # Payload's packages are published together and each names the others at its own version exactly, so every
+      # @payloadcms package is put at the one version payload resolves to
+      - if: matrix.payload != 'lockfile'
+        name: Install Next ${{ matrix.next }} and Payload ${{ matrix.payload }}
+        run: |
+          payload=$(npm view "payload@${{ matrix.payload }}" version --json | node -e '
+            const versions = [].concat(JSON.parse(require("fs").readFileSync(0, "utf8")))
+            const parts = version => version.split(".").map(Number)
+            versions.sort((a, b) => { const [x, y] = [parts(a), parts(b)]; return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] })
+            console.log(versions.at(-1))')
+          pnpm add --save-dev --save-exact "next@${{ matrix.next }}" "payload@$payload" \
+            "@payloadcms/ui@$payload" "@payloadcms/next@$payload" "@payloadcms/db-postgres@$payload"
+          pnpm list next payload @payloadcms/ui @payloadcms/next @payloadcms/db-postgres
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  # Payload 4 is to be supported beside 3 in this major. Until then this says how far off it is, and a failure
+  # here does not fail the run: it is not to be made a required check.
+  payload-next:
+    name: Node 24, Next ^16.4.5, Payload beta (allowed to fail)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: widgets_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URI: postgres://postgres:postgres@127.0.0.1:5432/widgets_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      # Payload 4 asks for Node 24 or later
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install Next ^16.4.5 and Payload beta
+        run: |
+          payload=$(npm view payload@beta version)
+          pnpm add --save-dev --save-exact "next@^16.4.5" "payload@$payload" \
+            "@payloadcms/ui@$payload" "@payloadcms/next@$payload" "@payloadcms/db-postgres@$payload"
+          pnpm list next payload @payloadcms/ui @payloadcms/next @payloadcms/db-postgres
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  # The tarball as npm would get it: packed by pnpm, which points the exports at dist, and checked for what a
+  # consumer's tools would trip on. Nothing here reads the database.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm pack --pack-destination "$RUNNER_TEMP"
+      - run: npx --yes publint@0.3 "$RUNNER_TEMP"/payload-plugin-widgets-*.tgz
+      # the stylesheet has no types, and is not meant to: attw would only report that it has none
+      - run: >-
+          npx --yes @arethetypeswrong/cli@0.18 "$RUNNER_TEMP"/payload-plugin-widgets-*.tgz
+          --profile esm-only --exclude-entrypoints widgets.css

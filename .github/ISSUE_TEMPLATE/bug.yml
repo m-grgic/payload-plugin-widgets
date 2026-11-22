@@ -1,0 +1,72 @@
+name: Bug report
+description: Something the plugin does wrong, or does not do as the README says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security problem, such as a widget showing records the user may not read, do not open an issue.
+        Report it privately as described in SECURITY.md.
+  - type: input
+    id: plugin
+    attributes:
+      label: payload-plugin-widgets version
+      placeholder: 0.5.1
+    validations:
+      required: true
+  - type: input
+    id: payload
+    attributes:
+      label: Payload version
+      description: The version of `payload`; the `@payloadcms/*` packages should match it.
+      placeholder: 3.90.2
+    validations:
+      required: true
+  - type: input
+    id: next
+    attributes:
+      label: Next.js version
+      placeholder: 16.4.6
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: 22.20.0
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database adapter
+      options:
+        - "@payloadcms/db-postgres"
+        - "@payloadcms/db-vercel-postgres"
+        - "@payloadcms/db-sqlite"
+        - "@payloadcms/db-d1-sqlite"
+        - "@payloadcms/db-mongodb"
+        - Other (say which below)
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: The `widgetsPlugin(...)` call and the parts of the collections it reads. Leave out anything secret.
+      render: ts
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you did and what you saw. Include any error from the server log or the browser console.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
