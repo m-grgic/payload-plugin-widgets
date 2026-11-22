@@ -20,11 +20,20 @@ export const dayIn = (zone: string, value: Date | string) => {
 
 /** The moment a day starts at in the zone. */
 export const startOf = (zone: string, date: string) => {
-  const guess = Date.parse(`${date.slice(0, 10)}T00:00:00Z`)
-  const there = parts(zone, new Date(guess))
-  // how far the zone's clock is ahead of UTC at about that time
-  const ahead = Date.UTC(Number(there.year), Number(there.month) - 1, Number(there.day), Number(there.hour), Number(there.minute), Number(there.second)) - guess
-  return new Date(guess - ahead).toISOString()
+  const day = date.slice(0, 10)
+  const guess = Date.parse(`${day}T00:00:00Z`)
+  // how far the zone's clock is ahead of UTC at a moment
+  const ahead = (moment: number) => {
+    const there = parts(zone, new Date(moment))
+    return Date.UTC(Number(there.year), Number(there.month) - 1, Number(there.day), Number(there.hour), Number(there.minute), Number(there.second)) - moment
+  }
+  // the clock may be put forward or back between midnight in UTC and midnight there, so it is asked again at the
+  // first answer; of the two, the earlier that is still on that day there. Where midnight is skipped, that is the
+  // first moment the day has.
+  const first = guess - ahead(guess)
+  const second = guess - ahead(first)
+  const on = [first, second].filter(moment => dayIn(zone, new Date(moment)) === day)
+  return new Date(on.length ? Math.min(...on) : first).toISOString()
 }
 
 /** The day so many days after another, or before it where the number is negative. */

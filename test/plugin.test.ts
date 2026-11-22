@@ -70,3 +70,18 @@ test('a collection left out is no source', () => {
   assert.throws(() => widgetsPlugin({ sources: { orders: false }, widgets: [figure('f', 'orders', { label: 'x' })] })(config()), /"f"/)
   assert.throws(() => widgetsPlugin({ discover: false, widgets: [figure('f', 'posts', { label: 'x' })] })(config()), /"f"/)
 })
+
+test('where the database does not add up for the widgets, that is said once as Payload starts', async () => {
+  const built = await widgetsPlugin()(config())
+  const start = async (name: string) => {
+    const said: Record<string, unknown[]> = { info: [], warn: [], error: [] }
+    const logger = Object.fromEntries(Object.keys(said).map(level => [level, (message: unknown) => said[level].push(message)]))
+    const collections = Object.fromEntries((built.collections ?? []).map(collection => [collection.slug, { config: { ...collection, flattenedFields: collection.fields } }]))
+    await built.onInit?.({ db: { name }, logger, collections } as never)
+    return said
+  }
+  const mongo = await start('mongoose')
+  assert.equal(mongo.info.length, 1)
+  assert.match(String(mongo.info[0]), /mongoose.*at most 5000/)
+  assert.deepEqual(await start('postgres'), { info: [], warn: [], error: [] })
+})

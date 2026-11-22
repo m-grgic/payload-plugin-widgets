@@ -24,7 +24,7 @@ export type Dim = { field: string } | { date: string; daily: boolean }
 /** The records of a selection added up, told apart by any of the ways asked for: `over(0)` by the first of them alone, `over()` by none. */
 export interface Tally {
   over: (...dims: number[]) => Cell[]
-  /** There were more records than are read at once. */
+  /** There were more records than are read at once: more than MANY, not as many. */
   cut: boolean
 }
 
@@ -69,7 +69,8 @@ const merged = (cells: Cell[]) => {
 export const currencyOf = <D>(context: Context, amount: Amount<D>, doc: D) => (amount.currency?.(doc) || context.currency).toUpperCase()
 
 // What was read is kept for as long as the widgets were told to (`cache`), for whoever asked: the next page that
-// shows the same does not ask the database again. One store for every copy of this file a bundler makes.
+// shows the same does not ask the database again. What is kept is what the records came to, a count or the cells
+// of a tally, never the records themselves. One store for every copy of this file a bundler makes.
 const KEPT = Symbol.for('payload-plugin-widgets.kept')
 const kept = (): Map<string, { until: number; value: Promise<unknown> }> => ((globalThis as Loose)[KEPT] ??= new Map())
 const MOST = 500
@@ -117,27 +118,40 @@ const asked = (paths: string[]) => {
   return all
 }
 
-/** Every record of a selection with only the fields asked for, whatever the source. */
-export const fetched = async <D>(context: Context, from: AnySource, selection: Selection, select: string[], more: { limit?: number; sort?: string } = {}): Promise<D[]> => {
-  const read = async (): Promise<D[]> => {
-    // generic over the collection, which the typed local API cannot follow
-    const { docs } = await (context.payload.find as Loose)({
-      ...context.as, collection: from.slug, where: selection.where, pagination: false, limit: more.limit ?? MANY,
-      ...(more.sort ? { sort: more.sort } : {}),
-      ...(from.draft ? { draft: true } : {}),
-      ...(select.length ? { select: asked(select) } : {}),
-    })
-    return docs
-  }
-  // the first few of a list are read as they are now: somebody may just have added one
-  return more.limit || more.sort ? read() : remembered(context, from, ['records', selection.where, [...select].sort()], read)
+/** Records of a selection with only the fields asked for, whatever the source: at most `limit` of them. */
+const query = async <D>(context: Context, from: AnySource, selection: Selection, select: string[], limit: number, sort?: string): Promise<D[]> => {
+  // generic over the collection, which the typed local API cannot follow
+  const { docs } = await (context.payload.find as Loose)({
+    ...context.as, collection: from.slug, where: selection.where, pagination: false, limit,
+    ...(sort ? { sort } : {}),
+    ...(from.draft ? { draft: true } : {}),
+    ...(select.length ? { select: asked(select) } : {}),
+  })
+  return docs
 }
 
+/**
+ * Every record of a selection with only the fields asked for, whatever the source: at most MANY of them. Records are
+ * not kept (see `cache`): what is kept is what they come to.
+ */
+export const fetched = <D>(context: Context, from: AnySource, selection: Selection, select: string[], more: { limit?: number; sort?: string } = {}): Promise<D[]> =>
+  query<D>(context, from, selection, select, more.limit ?? MANY, more.sort)
+
+/** Every record of a selection up to MANY, and whether there were more: one more is asked for to tell. */
+const upTo = async <D>(context: Context, from: AnySource, selection: Selection, select: string[]) => {
+  const docs = await query<D>(context, from, selection, select, MANY + 1)
+  return { docs: docs.slice(0, MANY), cut: docs.length > MANY }
+}
+
+/** How many records there are in a selection, with the access of whoever asks. */
 export const counted = (context: Context, from: AnySource, selection: Selection): Promise<number> =>
-  from.draft
-    // counting does not know about drafts, so the latest versions are read and counted
-    ? fetched(context, from, selection, []).then(docs => docs.length)
-    : remembered(context, from, ['count', selection.where], async () => (await (context.payload.count as Loose)({ ...context.as, collection: from.slug, where: selection.where })).totalDocs)
+  remembered(context, from, ['count', !!from.draft, selection.where], async () => {
+    const asked = { ...context.as, collection: from.slug, where: selection.where }
+    // counting does not know about drafts: the latest versions are found as the admin lists them, one of them read,
+    // and how many there are is what comes with it
+    if (from.draft) return (await (context.payload.find as Loose)({ ...asked, draft: true, limit: 1 })).totalDocs
+    return (await (context.payload.count as Loose)(asked)).totalDocs
+  })
 
 /** The values a record has in a field, as text and each once: what it points at by its id, and one of nothing where it has none. */
 export const valuesOf = (doc: unknown, field: string): string[] => {
@@ -154,35 +168,61 @@ const keysOf = (context: Context, dim: Dim, doc: unknown, path = 'field' in dim 
 /** Every way of taking one of each. */
 const crossed = (lists: string[][]): string[][] => lists.reduce<string[][]>((before, list) => before.flatMap(keys => list.map(key => [...keys, key])), [[]])
 
+/** Whether what a record has is a number at all: one that has nothing, or what is not a number, has none. */
+const numeric = (value: unknown) => (typeof value === 'number' ? Number.isFinite(value) : value !== null && value !== undefined && value !== '' && typeof value !== 'object' && Number.isFinite(Number(value)))
+
+/**
+ * Whether records with nothing in the field are passed over rather than counted as nought: so they are for an
+ * average, a lowest and a highest of a field, as the database has them. A sum counts them as nought, which adds
+ * nothing; and so does a formula, where nought is what an empty field stands for.
+ */
+const skips = (amount: Amount<unknown>) => !!amount.plain?.field && amount.plain.formula === undefined && (amount.how === 'avg' || amount.how === 'min' || amount.how === 'max')
+
+/** Every way of choosing some of so many, each in order: `[]`, `[0]`, `[1]`, `[0, 1]` of two. */
+const choices = (many: number) => Array.from({ length: 2 ** many }, (_, mask) => Array.from({ length: many }, (_, index) => index).filter(index => mask & (2 ** index)))
+
 /**
  * Records added up one by one. One that has several of what it is told apart by counts under each. One whose number
  * is in the rows of an array counts as what its rows come to; told apart by what the rows themselves have, as what
- * the rows under each come to.
+ * the rows under each come to. All of it is worked out at once, for every way it can be asked, so that what is kept
+ * is what the records come to and not the records.
  */
-const fromRecords = <D>(context: Context, docs: D[], amount: Amount<D>, dims: Dim[]): Tally => {
+const fromRecords = <D>(context: Context, docs: D[], cut: boolean, amount: Amount<D>, dims: Dim[]): Tally => {
   const formula = amount.plain?.formula ?? amount.plain?.field
-  return {
-    cut: docs.length >= MANY,
-    over: (...which) => merged(docs.flatMap(doc => {
-      const currency = amount.format === 'money' ? currencyOf(context, amount, doc) : ''
-      const cell = (keys: string[], value: number): Cell => ({ keys, currency, count: 1, sum: value, min: value, max: value })
-      const { rows, list } = formula === undefined ? { rows: undefined, list: [{ value: amount.of(doc), row: undefined }] } : pieces(formula, doc)
-      if (!rows) return crossed(which.map(index => keysOf(context, dims[index], doc))).map(keys => cell(keys, list.reduce((sum, piece) => sum + piece.value, 0)))
-      const inside = `${rows}.`
-      const each = new Map<string, Cell>()
-      for (const { row, value } of list) {
-        const lists = which.map(index => {
-          const dim = dims[index]
-          const path = 'field' in dim ? dim.field : dim.date
-          return path.startsWith(inside) ? keysOf(context, dim, row, path.slice(inside.length)) : keysOf(context, dim, doc)
-        })
-        for (const keys of crossed(lists)) {
-          const name = JSON.stringify(keys)
-          each.set(name, cell(keys, (each.get(name)?.sum ?? 0) + value))
-        }
+  const passed = skips(amount as Amount<unknown>) ? amount.plain?.field : undefined
+  const of = (which: number[]) => merged(docs.flatMap(doc => {
+    const currency = amount.format === 'money' ? currencyOf(context, amount, doc) : ''
+    const cell = (keys: string[], value: number): Cell => ({ keys, currency, count: 1, sum: value, min: value, max: value })
+    const { rows, list } = formula === undefined ? { rows: undefined, list: [{ value: amount.of(doc), row: undefined }] } : pieces(formula, doc)
+    if (!rows) {
+      if (passed && !numeric(at(doc, passed))) return []
+      return crossed(which.map(index => keysOf(context, dims[index], doc))).map(keys => cell(keys, list.reduce((sum, piece) => sum + piece.value, 0)))
+    }
+    const inside = `${rows}.`
+    const each = new Map<string, Cell>()
+    for (const { row, value } of list) {
+      if (passed && !numeric(passed.startsWith(inside) ? at(row, passed.slice(inside.length)) : at(doc, passed))) continue
+      const lists = which.map(index => {
+        const dim = dims[index]
+        const path = 'field' in dim ? dim.field : dim.date
+        return path.startsWith(inside) ? keysOf(context, dim, row, path.slice(inside.length)) : keysOf(context, dim, doc)
+      })
+      for (const keys of crossed(lists)) {
+        const name = JSON.stringify(keys)
+        each.set(name, cell(keys, (each.get(name)?.sum ?? 0) + value))
       }
-      return [...each.values()]
-    })),
+    }
+    return [...each.values()]
+  }))
+  // the widgets tell records apart by two things at most, so this is four ways of asking
+  const worked = new Map(choices(dims.length).map(which => [which.join(','), of(which)]))
+  return {
+    cut,
+    over: (...which) => {
+      const sorted = [...new Set(which)].sort((a, b) => a - b)
+      const cells = worked.get(sorted.join(',')) ?? []
+      return cells.map(one => ({ ...one, keys: which.map(index => one.keys[sorted.indexOf(index)]) }))
+    },
   }
 }
 
@@ -300,15 +340,18 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
   })
   if (currency) picked.currency = currency
   const headings = Object.keys(picked).length
-  // a record without the number counts as nought, as it does when it is read
+  // a record without the number counts as nought, as it does when it is read; for an average, a lowest and a
+  // highest of a field it is passed over, as it is when it is read
   let value: Loose
+  const passed = skips(amount as Amount<unknown>) ? columnOf(fields, table, plain.field as string, NUMBERS) : undefined
+  if (skips(amount as Amount<unknown>) && !passed) return undefined
   try {
-    value = formula === undefined ? sql`1` : written(sql, formula, (path, types) => columnOf(fields, table, path, types))
+    value = passed ?? (formula === undefined ? sql`1` : written(sql, formula, (path, types) => columnOf(fields, table, path, types)))
   } catch (error) {
     if (error instanceof Unplain) return undefined
     throw error
   }
-  Object.assign(picked, { count: sql`count(*)`, sum: sql`sum(${value})`, min: sql`min(${value})`, max: sql`max(${value})` })
+  Object.assign(picked, { count: passed ? sql`count(${passed})` : sql`count(*)`, sum: sql`sum(${value})`, min: sql`min(${value})`, max: sql`max(${value})` })
 
   try {
     // Payload builds the query it would count with, and is handed this to run in place of the count
@@ -343,11 +386,27 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
 
 const snake = (name: string) => name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
 
-/** What the records of a selection come to, told apart by any of `dims`. */
+// what a measure worked out by a function is, where nothing else says: the same object is the same measure. One for
+// every copy of this file a bundler makes, as the store is.
+const NAMED = Symbol.for('payload-plugin-widgets.named')
+const names = (): { next: number; of: WeakMap<object, number> } => ((globalThis as Loose)[NAMED] ??= { next: 0, of: new WeakMap() })
+const nameOfAmount = (amount: object) => {
+  const all = names()
+  if (!all.of.has(amount)) all.of.set(amount, (all.next += 1))
+  return all.of.get(amount) as number
+}
+
+/** What the records of a selection come to, told apart by any of `dims`. Kept as that (see `cache`), never as the records. */
 export const tallied = async <D>(context: Context, from: AnySource, selection: Selection, amount: Amount<D>, dims: Dim[] = []): Promise<Tally> => {
-  const spec = amount.plain ? [selection.where, amount.plain, amount.format, dims, context.zone ?? '', context.as.overrideAccess] : undefined
-  const cells = spec ? await remembered(context, from, ['sums', ...spec], () => inDatabase(context, from, selection, amount, dims)) : undefined
-  if (cells) return { cut: false, over: (...which) => merged(cells.map(cell => ({ ...cell, keys: which.map(index => cell.keys[index]) }))) }
-  const select = [...new Set([...amount.select, ...dims.map(dim => ('field' in dim ? dim.field : dim.date))])]
-  return fromRecords(context, await fetched<D>(context, from, selection, select), amount, dims)
+  const spec = [
+    selection.where, amount.plain ?? `own:${nameOfAmount(amount)}`, amount.format, skips(amount as Amount<unknown>), dims,
+    context.zone ?? '', context.currency, !!from.draft, context.as.overrideAccess,
+  ]
+  return remembered(context, from, ['tally', ...spec], async (): Promise<Tally> => {
+    const cells = amount.plain ? await inDatabase(context, from, selection, amount, dims) : undefined
+    if (cells) return { cut: false, over: (...which) => merged(cells.map(cell => ({ ...cell, keys: which.map(index => cell.keys[index]) }))) }
+    const select = [...new Set([...amount.select, ...dims.map(dim => ('field' in dim ? dim.field : dim.date))])]
+    const { docs, cut } = await upTo<D>(context, from, selection, select)
+    return fromRecords(context, docs, cut, amount, dims)
+  })
 }

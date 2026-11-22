@@ -57,6 +57,12 @@ before(async () => {
       collections: [
         { slug: 'users', auth: true, fields: [] },
         { slug: 'customers', fields: [{ name: 'name', type: 'text' }] },
+        // only those of the team the request says it is from, in a header
+        {
+          slug: 'tickets',
+          access: { read: ({ req }) => { const team = req.headers?.get('x-team'); return team ? { team: { equals: team } } : false } },
+          fields: [{ name: 'team', type: 'text' }, { name: 'hours', type: 'number' }],
+        },
         {
           slug: 'orders',
           fields: [
@@ -88,6 +94,7 @@ before(async () => {
   seeded = orders(customers.map(customer => customer.id as number))
   for (const data of seeded) await payload.create({ collection: 'orders' as never, data: data as never })
   req = await createLocalReq({ user: { ...user, collection: 'users' } as never }, payload)
+  for (const [team, hours] of [['north', 2], ['north', null], ['north', 5], ['south', 40]] as const) await payload.create({ collection: 'tickets' as never, data: { team, hours } as never })
 
   const { find } = payload
   payload.find = ((args: Parameters<typeof find>[0]) => {
@@ -179,6 +186,16 @@ test('what is in the rows of an array is read from the records, and comes to wha
   assert.deepEqual(plain(kinds.database), plain(kinds.records))
   const goods = rows.filter(row => row.kind === 'goods').reduce((sum, row) => sum + (row.quantity ?? 0), 0)
   assert.equal(kinds.records.bars.find(bar => bar.label === 'goods')?.amount, goods)
+})
+
+test('what an access reads of the request, it reads the same both ways', { skip, timeout: 60000 }, async () => {
+  const north = await createLocalReq({ user: req.user as never }, payload)
+  north.headers.set('x-team', 'north')
+  for (const [measure, value] of [[undefined, 3], [{ sum: 'hours' }, 7], [{ avg: 'hours' }, 3.5], [{ min: 'hours' }, 2]] as [FigurePick['measure'], number][]) {
+    const { records, database } = await both(sums => readFigure({ ...contextFor(north), sums }, { source: 'tickets', measure }))
+    assert.deepEqual(plain(database), plain(records))
+    assert.equal(records.amount, value, JSON.stringify(measure))
+  }
 })
 
 test('nothing was given up on along the way', { skip }, () => {

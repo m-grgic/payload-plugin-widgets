@@ -1,7 +1,7 @@
 import type { CollectionConfig, CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
 import { dateProblems, elevatedProblems, figureProblems, formulaProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
-import { forgotten } from './tally'
+import { forgotten, MANY } from './tally'
 import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
 
 // Dashboard widgets that read from the collections. Without anything declared, every collection is a source as its
@@ -165,6 +165,9 @@ export const widgetsPlugin = (options: Options = {}): Plugin => Object.assign((c
       if (filters.length) payload.logger.error(`widgetsPlugin: ${filters.length === 1 ? 'a filter of a source is' : 'some filters of the sources are'} on what is not there\n${listed(filters)}`)
       // Payload's own come after every plugin; anything else was added by one that ran later still
       const late = options.discover === false ? [] : Object.keys(payload.collections).filter(slug => !seen.has(slug) && !slug.startsWith('payload-'))
+      // said once, so that a figure that stops at MANY records is not a surprise
+      const adapter = (payload.db as { name?: string } | undefined)?.name
+      if (adapter !== 'postgres') payload.logger.info(`widgetsPlugin: the ${adapter ?? 'unknown'} database adapter does not add up for the widgets, so sums, averages and charts are worked out from the records, at most ${MANY} of them`)
       if (late.length) payload.logger.warn(`widgetsPlugin: ${late.join(', ')} ${late.length === 1 ? 'was' : 'were'} added to the config after the widgets were set up, and ${late.length === 1 ? 'is no source' : 'are no sources'}: give the plugin that adds ${late.length === 1 ? 'it' : 'them'} an order below ${ORDER}`)
     },
     admin: {

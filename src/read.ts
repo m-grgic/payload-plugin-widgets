@@ -80,7 +80,8 @@ const span = (context: Context, pick: Pick): { start: string | null; end: string
   if (pick.period === 'upcoming') return { start: today, end: null }
   if (pick.period === 'month') return { start: `${today.slice(0, 7)}-01`, end: null }
   if (pick.period === 'year') return { start: `${today.slice(0, 4)}-01-01`, end: null }
-  if (pick.period === 'last30') return { start: after(today, -30), end: null }
+  // thirty days, today the last of them
+  if (pick.period === 'last30') return { start: after(today, -29), end: null }
   if (pick.period === 'last12') {
     const [year, month] = today.split('-').map(Number)
     return { start: new Date(Date.UTC(year, month - 12, 1)).toISOString().slice(0, 10), end: null }

@@ -64,8 +64,11 @@ export interface Context {
   payload: Payload
   /** The request of whoever is looking. */
   req: PayloadRequest
-  /** Options for a read made as the signed-in user; with the server's access where the widget asks for that (`overrideAccess`). */
-  as: { depth: 0; overrideAccess: boolean; user: Viewer }
+  /**
+   * Options for a read made as the signed-in user, with their request and its locale, so that access and localized
+   * fields come out as they do anywhere else; with the server's access where the widget asks for that (`overrideAccess`).
+   */
+  as: { depth: 0; overrideAccess: boolean; user: Viewer; req?: PayloadRequest; locale?: PayloadRequest['locale'] }
   /** Every source the widgets were given, by name, and whether one is for the person looking. */
   sources: Record<string, AnySource>
   /** Asked of what the collection lets them read, and of the source's own `access` where it has one. */

@@ -26,7 +26,9 @@ export const contextFor = (req: PayloadRequest, data: Record<string, unknown> = 
   return {
     payload,
     req,
-    as: { depth: 0, overrideAccess: false, user },
+    // the request itself, so that an access function that reads its headers, cookies or `context` reads the same
+    // here as where the database adds up, and so do localized fields
+    as: { depth: 0, overrideAccess: false, user, req, ...(req.locale ? { locale: req.locale } : {}) },
     sources: settings.sources,
     mayRead: source => mayRead(req, source),
     today,

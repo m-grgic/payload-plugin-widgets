@@ -18,6 +18,18 @@ test('a day starts at midnight there, in winter and in summer', () => {
   assert.equal(startOf(ZONE, '2026-07-15'), '2026-07-14T22:00:00.000Z')
 })
 
+test('a day starts at midnight there on the days the clocks change, far east of UTC as well', () => {
+  // the clocks go forward or back in the hours between midnight there and midnight in UTC
+  assert.equal(startOf('Australia/Sydney', '2026-10-04'), '2026-10-03T14:00:00.000Z')
+  assert.equal(startOf('Australia/Sydney', '2026-04-05'), '2026-04-04T13:00:00.000Z')
+  assert.equal(startOf('Pacific/Auckland', '2026-09-27'), '2026-09-26T12:00:00.000Z')
+  // and where they change after midnight in UTC
+  assert.equal(startOf(ZONE, '2026-03-29'), '2026-03-28T23:00:00.000Z')
+  assert.equal(startOf(ZONE, '2026-10-25'), '2026-10-24T22:00:00.000Z')
+  // where midnight is skipped, the day starts at the first moment it has
+  assert.equal(startOf('America/Santiago', '2026-09-06'), '2026-09-06T04:00:00.000Z')
+})
+
 test('days are moved across months and years', () => {
   assert.equal(after('2026-12-31', 1), '2027-01-01')
   assert.equal(after('2026-03-01', -1), '2026-02-28')
