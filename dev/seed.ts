@@ -24,12 +24,13 @@ const TASKS: [string, 'todo' | 'doing' | 'done', number][] = [
 ]
 
 export const seed = async (payload: Payload) => {
-  const { totalDocs } = await payload.count({ collection: 'users' })
+  // with the server's access, said out loud: Payload 4's local API no longer assumes it
+  const { totalDocs } = await payload.count({ collection: 'users', overrideAccess: true })
   if (totalDocs) return
   payload.logger.info('demo: filling an empty database with a made-up shop')
   const roll = dice(7)
   const now = Date.now()
-  const create = (collection: string, data: Record<string, unknown>) => payload.create({ collection, data, depth: 0 } as never) as Promise<{ id: number | string }>
+  const create = (collection: string, data: Record<string, unknown>) => payload.create({ collection, data, depth: 0, overrideAccess: true } as never) as Promise<{ id: number | string }>
 
   const user = await create('users', { email: 'demo@example.com', password: 'demo', name: 'Demo', roles: ['admin'] })
 

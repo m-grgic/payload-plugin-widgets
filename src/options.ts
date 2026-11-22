@@ -1,7 +1,9 @@
 import type { Access, CollectionSlug, Config, Field, Payload, PayloadRequest, Where } from 'payload'
 import { sourcesOf } from './discover'
+import { once } from './memo'
+import { accessArgs } from './versions'
 import type { Dictionary, Plurals } from './strings'
-import type { AnySource, Doc, Fields, Format, Label, Narrowing, Numbers, Period, Reckoned, Source, Vars, View, VIEWS } from './types'
+import type { AnySource, Doc, Fields, Format, Label, Narrowing, Numbers, Paths, Period, Reckoned, Source, Vars, View, VIEWS } from './types'
 
 // What the plugin is given by the project that uses it: the sources, the widgets made of them, and how things are
 // said. Everything has a default: without any of it, every collection is a source as its fields describe it.
@@ -11,8 +13,8 @@ import type { AnySource, Doc, Fields, Format, Label, Narrowing, Numbers, Period,
 type Loose = any
 
 interface Common {
-  /** In English; `translate` in the options says it in the other languages. */
-  label: string
+  /** In English, for `translate` in the options to say in the other languages; or in several, by their codes: `{ en: 'Sales', hr: 'Prodaja' }`. */
+  label: Label
   /**
    * Who it is for, asked as Payload asks it of a collection: `({ req }) => req.user?.role === 'admin'`. A filter in
    * place of `true` leaves it only those records. Whoever its source is for where it is left out.
@@ -35,7 +37,7 @@ interface Elevated {
 }
 
 /** A link in the head of a tile. */
-export interface Action { label: string; href: string }
+export interface Action { label: Label; href: string }
 
 interface Slots {
   /** A link of your own in the head of the tile: `{ label: 'Export', href: '/admin/export' }`. A figure is given it under the number. */
@@ -60,8 +62,8 @@ interface Narrowed<S extends CollectionSlug, F extends string> {
    */
   where?: Narrowing<NoInfer<S>>
   period?: Period
-  /** The date the period goes by: the source's own where it is left out. */
-  date?: keyof Doc<NoInfer<S>> & string
+  /** The date the period goes by, by its path as a source's `date` is: the source's own where it is left out. */
+  date?: Paths<Doc<NoInfer<S>>, string>
   /** For the period between two dates: the first and the last day, as YYYY-MM-DD. Either may be left out. */
   from?: string
   to?: string
@@ -69,7 +71,7 @@ interface Narrowed<S extends CollectionSlug, F extends string> {
 
 interface Kept {
   slug: string
-  label: string
+  label: Label
   access?: Access
   home?: Home
   data?: Record<string, unknown>
@@ -82,6 +84,8 @@ export interface SourceWidget extends Kept, Slots {
   /** The source itself, or the collection of one that was found by the plugin. */
   source: AnySource | string
   overrideAccess?: boolean
+  /** Of a figure's `fields`, those whoever has it may set where it reads with the server's access (see `trusted` on a figure). */
+  trusted?: string[]
   show: { filter?: string; where?: Where; period?: Period; date?: string; from?: string; to?: string; measure?: string | Reckoned | (string | Reckoned)[]; list?: string; limit?: number; by?: string; series?: string; as?: string; compare?: 'previous'; goal?: number; note?: string }
 }
 
@@ -95,34 +99,53 @@ export interface OwnWidget extends Kept {
 /** A ready-made widget as the plugin keeps it. */
 export type Widget = SourceWidget | OwnWidget
 
-const made = (kind: SourceWidget['kind'], slug: string, source: AnySource | string, { label, access, overrideAccess, home, data, fields, action, after, ...show }: Common & Loose): Widget => ({
+const made = (kind: SourceWidget['kind'], slug: string, source: AnySource | string, { label, access, overrideAccess, trusted, home, data, fields, action, after, ...show }: Common & Loose): Widget => ({
   slug, label, kind, source, show,
-  ...(access ? { access } : {}), ...(overrideAccess ? { overrideAccess: true } : {}), ...(home !== undefined ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
+  ...(access ? { access } : {}), ...(overrideAccess ? { overrideAccess: true } : {}), ...(Array.isArray(trusted) ? { trusted } : {}), ...(home !== undefined ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
   ...(action ? { action } : {}), ...(after ? { after } : {}),
 })
 
 
-type FigureShow<S extends CollectionSlug, F extends string, M extends string> = Common & Slots & Elevated & Narrowed<S, F> & {
+/** What a figure takes. Progress is towards a goal, so `as: 'progress'` needs one. */
+export type FigureOptions<S extends CollectionSlug = Loose, F extends string = string, M extends string = string> = Common & Slots & Elevated & Narrowed<S, F> & {
   /**
    * How many there are where it is left out. One of the source's measures by name, or one said in place: a number
    * of the collection, or a measure that adds one up, as `sum`, `avg`, `min` or `max` (`{ avg: 'total' }`).
    */
-  measure?: M | Reckoned<M | Numbers<S>>
+  measure?: M | Reckoned<M | Numbers<S>, Fields<S>>
   /** Also read for the period before, which is as long: the line under the figure then says how much more or less it is. Needs a period. */
   compare?: 'previous'
-  /** What it is set against, in what the measure counts: the line under the figure then says how much of it that is. */
-  goal?: number
   /**
    * What the line under the figure says, in place of the usual: `'{left} to go'`. It can use `{value}`, `{note}`
    * (what it would have said), with `compare` `{previous}` and `{change}`, and with a goal `{goal}`, `{percent}` and `{left}`.
    */
   note?: string
-  /** A number, a number with how far towards its goal it is (`'progress'`), or a number over a line of what it was (`'sparkline'`). */
-  as?: As<'figure'>
   /** Settings of its own, with what they start as: a measure reads them from `context.data`. */
   fields?: Field[]
+  /**
+   * With `overrideAccess`, which of its own `fields` whoever has it on their dashboard may set: only those reach
+   * `context.data` as they set them, the rest stay what `data` starts them as. None where it is left out, since what
+   * they set would be read with the server's access: `trusted: ['team']`. Only a figure has settings of its own.
+   */
+  trusted?: string[]
   data?: Record<string, unknown>
-}
+} & (
+  | {
+    /** A number with how far towards its goal it is. */
+    as: 'progress'
+    /** What it is set against, in what the measure counts: the line under the figure then says how much of it that is. */
+    goal: number
+  }
+  | {
+    /** A number, a number with how far towards its goal it is (`'progress'`, with a `goal`), or a number over a line of what it was (`'sparkline'`). */
+    as?: As<'figure'>
+    /** What it is set against, in what the measure counts: the line under the figure then says how much of it that is. */
+    goal?: number
+  }
+)
+
+/** Where a figure is drawn as progress, the goal it needs; the union above cannot hold that by itself, a view of the project's own being any name. */
+type Progress<A> = 'progress' extends A ? { goal: number } : unknown
 
 /**
  * One figure: how many records, or one of a source's measures. Out of a source that is declared, or out of any
@@ -134,21 +157,23 @@ type FigureShow<S extends CollectionSlug, F extends string, M extends string> = 
  *   figure('sold', invoices, { label: 'Sold this month', measure: 'total', period: 'month', compare: 'previous', goal: 5000, as: 'progress' })
  */
 export const figure: {
-  <S extends CollectionSlug, F extends string, M extends string>(slug: string, source: Source<S, F, M, Loose, Loose, Loose>, show: FigureShow<S, F, NoInfer<M>>): Widget
-  <const S extends CollectionSlug>(slug: string, source: S, show: FigureShow<S, never, Numbers<S> | 'count'>): Widget
+  <S extends CollectionSlug, F extends string, M extends string, const A extends string = never>(slug: string, source: Source<S, F, M, Loose, Loose, Loose>, show: FigureOptions<S, F, NoInfer<M>> & { as?: A } & Progress<A>): Widget
+  <const S extends CollectionSlug, const A extends string = never>(slug: string, source: S, show: FigureOptions<S, never, Numbers<S> | 'count'> & { as?: A } & Progress<A>): Widget
 } = (slug: string, source: AnySource | string, show: Loose) => made('figure', slug, source, show)
 
-type ListShow<S extends CollectionSlug, F extends string, L extends string> = Common & Slots & { list?: L; filter?: NoInfer<F>; where?: Narrowing<NoInfer<S>>; limit?: number; as?: As<'list'> }
+/** What a list takes: one of the source's lists, the first it declares where none is named. */
+export type ListOptions<S extends CollectionSlug = Loose, F extends string = string, L extends string = string> = Common & Slots & { list?: L; filter?: NoInfer<F>; where?: Narrowing<NoInfer<S>>; limit?: number; as?: As<'list'> }
 
-/** The first few rows of one of a source's lists; of a collection by its slug, its latest records. */
+/** The first few rows of one of a source's lists, the first it declares where none is named; of a collection by its slug, its latest records. */
 export const list: {
-  <S extends CollectionSlug, F extends string, L extends string>(slug: string, source: Source<S, F, Loose, L, Loose, Loose>, show: ListShow<S, F, NoInfer<L>> & { list: NoInfer<L> }): Widget
-  <const S extends CollectionSlug>(slug: string, source: S, show: ListShow<S, never, 'latest'>): Widget
+  <S extends CollectionSlug, F extends string, L extends string>(slug: string, source: Source<S, F, Loose, L, Loose, Loose>, show: ListOptions<S, F, NoInfer<L>>): Widget
+  <const S extends CollectionSlug>(slug: string, source: S, show: ListOptions<S, never, 'latest'>): Widget
 } = (slug: string, source: AnySource | string, show: Loose) => made('list', slug, source, show)
 
-type ChartShow<S extends CollectionSlug, F extends string, M extends string, G extends string> = Common & Slots & Elevated & Narrowed<S, F> & {
+/** What a chart takes. */
+export type ChartOptions<S extends CollectionSlug = Loose, F extends string = string, M extends string = string, G extends string = string> = Common & Slots & Elevated & Narrowed<S, F> & {
   /** One measure, or several to set side by side: `['revenue', 'costs']`. Each is then a series. */
-  measure?: M | Reckoned<M | Numbers<S>> | (M | Reckoned<M | Numbers<S>>)[]
+  measure?: M | Reckoned<M | Numbers<S>, Fields<S>> | (M | Reckoned<M | Numbers<S>, Fields<S>>)[]
   by?: G | 'time'
   /** Another of the source's groups to tell every bar apart by: `by: 'time', series: 'status'`. Each of the first few of its values is then a series. */
   series?: G
@@ -158,8 +183,8 @@ type ChartShow<S extends CollectionSlug, F extends string, M extends string, G e
 
 /** A measure over time, or split by one of the source's groups, as bars unless `as` says otherwise; of a collection by its slug, by any of its selects, checkboxes and relationships. */
 export const chart: {
-  <S extends CollectionSlug, F extends string, M extends string, G extends string>(slug: string, source: Source<S, F, M, Loose, G, Loose>, show: ChartShow<S, F, NoInfer<M>, NoInfer<G>>): Widget
-  <const S extends CollectionSlug>(slug: string, source: S, show: ChartShow<S, never, Numbers<S> | 'count', Fields<S>>): Widget
+  <S extends CollectionSlug, F extends string, M extends string, G extends string>(slug: string, source: Source<S, F, M, Loose, G, Loose>, show: ChartOptions<S, F, NoInfer<M>, NoInfer<G>>): Widget
+  <const S extends CollectionSlug>(slug: string, source: S, show: ChartOptions<S, never, Numbers<S> | 'count', Fields<S>>): Widget
 } = (slug: string, source: AnySource | string, show: Loose) => made('chart', slug, source, show)
 
 /**
@@ -181,15 +206,26 @@ export const widget = (slug: string, { label, access, home, Component, size = 'w
   ...(access ? { access } : {}), ...(home !== undefined ? { home } : {}), ...(data ? { data } : {}), ...(fields ? { fields } : {}),
 })
 
-export interface Options {
+/** The sources as they are given: a collection by its slug may be left out with `false`, but only a collection can. */
+export type Sources = Record<string, AnySource | boolean | undefined>
+type SourcesOf<G> = { [K in keyof G]: K extends CollectionSlug ? AnySource | boolean | undefined : AnySource | undefined }
+
+export interface Options<G extends Sources = Sources> {
   /**
    * Every collection is a source by itself, as its fields describe it. Here one is left out with `false`, or
    * declared with `source(…)` for what cannot be found: `{ media: false, invoices }`. A declared one is kept by the
-   * name it is given here; renaming it leaves the widgets set up with it saying they are not set up.
+   * name it is given here; renaming it leaves the widgets set up with it saying they are not set up. With the
+   * generated types, `false` is only taken for a collection there is.
    */
-  sources?: { [Slug in CollectionSlug]?: AnySource | boolean } & Record<string, AnySource | boolean | undefined>
+  sources?: G & SourcesOf<G>
   /** `false` to have only the sources that are declared. */
   discover?: boolean
+  /**
+   * A widget, or a source, set up with what is not there stops the config from being built, and so does Payload
+   * where that only shows once it has settled the collections (a field a plugin adds later, say). `false` to have
+   * it only said in the log as Payload starts, as before 0.6. `true` where it is left out.
+   */
+  strict?: boolean
   /** The ready-made widgets, in the order they are laid out: `figure(…)`, `list(…)`, `chart(…)`, and `widget(…)` for one of your own. */
   widgets?: Widget[]
   /**
@@ -236,6 +272,40 @@ export interface Options {
    * Nothing is kept where it is left out.
    */
   cache?: number
+  /** How much a widget may ask of the database. */
+  limits?: Limits
+  /**
+   * The widgets anybody can set up in the dashboard's drawer: a figure, a list and a chart of any source that is for
+   * them. `false` for none (the ready-made ones stay), or only some: `{ kinds: ['figure'], sources: ['invoices'],
+   * access: ({ req }) => req.user?.role === 'admin' }`. All of them for everybody where it is left out.
+   */
+  userWidgets?: false | UserWidgets
+}
+
+/** How much a widget may ask of the database, so that one set up carelessly cannot hold up the rest. */
+export interface Limits {
+  /** How many records a widget reads at most where they are read one by one: 5000 where it is left out. */
+  records?: number
+  /**
+   * How many values of a field a tally keeps apart at most, the rest counted together as one: 1000 where it is left
+   * out. A chart only ever draws its first few of them, and has the database keep no more than that.
+   */
+  groups?: number
+  /**
+   * In milliseconds, how long a widget may take to read: its tile then says it took too long, and the others are
+   * drawn as ever. On Postgres the database is told to give up as well. No limit where it is left out.
+   */
+  timeoutMs?: number
+}
+
+/** Which of the widgets set up in the drawer there are, and for whom. */
+export interface UserWidgets {
+  /** Who may have them on their dashboard, asked for every request: a widget set up by somebody it no longer lets shows nothing. */
+  access?: (args: { req: PayloadRequest }) => boolean | Promise<boolean>
+  /** Which kinds are offered: all three where it is left out. */
+  kinds?: Array<'figure' | 'list' | 'chart'>
+  /** Which sources they may be of, by the name a source is given or its collection: any where it is left out. */
+  sources?: string[]
 }
 
 /** How things are said to whoever makes a request. */
@@ -261,6 +331,10 @@ export interface Settings {
   sums: 'database' | 'records'
   /** In seconds; nought for nothing kept. */
   cache: number
+  /** Only what was given: each has its default where it is read (see `Limits`). */
+  limits: Limits
+  /** `false` for none; otherwise what they are kept to, nothing for all of them. */
+  userWidgets: false | UserWidgets
 }
 
 const fill = (text: string, vars?: Vars) => (vars ? text.replace(/\{(\w+)\}/g, (whole, key) => (key in vars ? String(vars[key]) : whole)) : text)
@@ -295,6 +369,9 @@ export const settled = (options: Options, config: Config): Settings => {
     currency: (options.currency ?? 'EUR').toUpperCase(),
     sums: options.sums ?? 'database',
     cache: Math.max(0, Number(options.cache) || 0),
+    // what is not a number above nought is as if it were left out
+    limits: Object.fromEntries(Object.entries(options.limits ?? {}).filter(([, value]) => Number(value) > 0).map(([key, value]) => [key, key === 'timeoutMs' ? Number(value) : Math.max(1, Math.floor(Number(value)))])),
+    userWidgets: options.userWidgets === false ? false : options.userWidgets ?? {},
     format: (value, style, locale, currency) => {
       const own = options.format?.(value, { style, locale, ...(currency ? { currency } : {}) })
       if (own !== undefined) return own
@@ -319,14 +396,14 @@ export const sourceCalled = (sources: Record<string, AnySource>, name: string): 
   sources[name] ?? Object.values(sources).find(source => source.slug === name)
 
 /** Whether the collection of a source lets whoever makes the request read it at all. */
-export const readable = async (req: PayloadRequest, source: AnySource): Promise<boolean> => {
+export const readable = (req: PayloadRequest, source: AnySource): Promise<boolean> => once(req, ['readable', source.slug], async () => {
   const read = req.payload.collections[source.slug as CollectionSlug]?.config.access.read
   try {
-    return !!req.user && !!read && !!(await read({ req }))
+    return !!req.user && !!read && !!(await read(accessArgs(req, source.slug)))
   } catch {
     return false
   }
-}
+})
 
 /** What a widget adds to who its source is for. */
 export interface Gate { access?: Access; overrideAccess?: boolean }
@@ -335,13 +412,17 @@ export interface Gate { access?: Access; overrideAccess?: boolean }
  * What somebody is let see of a source: nothing, or its records, narrowed by whatever filters stood in place of a
  * yes. The collection is asked first, unless it is read with the server's access; then the source, then the widget.
  */
-export const accessTo = async (req: PayloadRequest, source: AnySource, gate: Gate = {}): Promise<Where[] | false> => {
+// asked once a request for each source and widget: a dashboard asks it of each widget more than once
+export const accessTo = (req: PayloadRequest, source: AnySource, gate: Gate = {}): Promise<Where[] | false> =>
+  once(req, ['access', source, gate.access, !!gate.overrideAccess], () => accessOnce(req, source, gate))
+
+const accessOnce = async (req: PayloadRequest, source: AnySource, gate: Gate): Promise<Where[] | false> => {
   if (!req.user) return false
   try {
     if (!gate.overrideAccess && !await readable(req, source)) return false
     const narrowed: Where[] = []
     for (const access of [source.access, gate.access]) {
-      const answer = access ? await access({ req }) : true
+      const answer = access ? await access(accessArgs(req, source.slug)) : true
       if (!answer) return false
       if (typeof answer === 'object') narrowed.push(answer)
     }
@@ -359,7 +440,8 @@ export const mayUse = async (settings: Settings, req: PayloadRequest, widget: Wi
   if (!req.user) return false
   if (widget.kind === 'own') {
     try {
-      return !widget.access || !!await widget.access({ req })
+      // of no collection: it is asked of the widget, by its own slug
+      return !widget.access || !!await widget.access(accessArgs(req, widget.slug))
     } catch {
       return false
     }
@@ -371,5 +453,8 @@ export const mayUse = async (settings: Settings, req: PayloadRequest, widget: Wi
 /** Whether somebody starts with a ready-made widget on their dashboard: it is for them, and it does not say otherwise. */
 export const startsWith = async (settings: Settings, req: PayloadRequest, widget: Widget): Promise<boolean> => {
   if (widget.home === false || !await mayUse(settings, req, widget)) return false
-  return typeof widget.home === 'function' ? !!await widget.home({ req }) : true
+  if (typeof widget.home !== 'function') return true
+  // asked as its access is: of its source's collection, or of the widget itself where it has none
+  const source = widget.kind === 'own' ? undefined : typeof widget.source === 'string' ? sourceCalled(settings.sources, widget.source) : widget.source
+  return !!await widget.home(accessArgs(req, source?.slug ?? widget.slug))
 }

@@ -27,18 +27,18 @@ export interface Compared {
 /** What a record has to have, as a filter says it: fields that all hold, or `and` and `or` of those. */
 export type Test<F extends string = string> = { and: Test<F>[] } | { or: Test<F>[] } | { [P in F]?: Compared }
 
-/** A number, a number field by its path, or something worked out of those. */
-export type Formula<F extends string = string> =
+/** A number, a number field by its path (`F`), or something worked out of those, choosing by any field (`T`). */
+export type Formula<F extends string = string, T extends string = string> =
   | number
   | F
-  | { add: Formula<F>[] }
-  | { subtract: [Formula<F>, Formula<F>] }
-  | { multiply: Formula<F>[] }
-  | { divide: [Formula<F>, Formula<F>] }
+  | { add: Formula<F, T>[] }
+  | { subtract: [Formula<F, T>, Formula<F, T>] }
+  | { multiply: Formula<F, T>[] }
+  | { divide: [Formula<F, T>, Formula<F, T>] }
   /** The first that has something in it: `{ first: ['billableTime', 'workDuration'] }`. */
-  | { first: Formula<F>[] }
+  | { first: Formula<F, T>[] }
   /** One or the other, by what the record has; nought where there is no `else`. */
-  | { when: Test; then: Formula<F>; else?: Formula<F> }
+  | { when: Test<T>; then: Formula<F, T>; else?: Formula<F, T> }
 
 export const COMPARISONS = ['equals', 'not_equals', 'in', 'not_in', 'exists', 'greater_than', 'greater_than_equal', 'less_than', 'less_than_equal'] as const
 const WAYS = ['add', 'subtract', 'multiply', 'divide', 'first', 'when'] as const

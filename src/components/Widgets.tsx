@@ -2,6 +2,7 @@ import React from 'react'
 import type { Where, WidgetServerProps } from 'payload'
 import { RenderServerComponent } from '@payloadcms/ui/elements/RenderServerComponent'
 import { mayUse, settingsOf } from '../options'
+import { dataFor, userMay } from '../users'
 import { CALCS, type Measure, type Period, type Reckoned } from '../types'
 import { Chart, Figure, Records } from './index'
 import { Notice } from './Tiles'
@@ -43,11 +44,23 @@ const unset = (req: WidgetServerProps['req'], label: string) => {
   return <Notice label={t(label)} note={t('Choose what it shows: the pencil on the widget while editing the dashboard')} kind="unset" />
 }
 
+/**
+ * Where `userWidgets` no longer lets whoever looks have one of these, or not of this kind or this source: said, and
+ * nothing read. Asked on every request, whatever the drawer offered when it was set up.
+ */
+const refused = async (req: WidgetServerProps['req'], kind: 'figure' | 'list' | 'chart', label: string, data: Record<string, unknown>) => {
+  if (await userMay(settingsOf(req.payload), req, kind, String(data.source))) return undefined
+  const { t } = wordsOf(req)
+  return <Notice label={t(label)} note={t('Not available to this account')} kind="denied" />
+}
+
 export const FigureWidget = async ({ req, widgetData: data }: WidgetServerProps) => {
-  if (!data?.source) return unset(req, 'A figure')
+  if (!data?.source) return unset(req, 'Figure')
+  const denied = await refused(req, 'figure', 'Figure', data)
+  if (denied) return denied
   return (
     <Figure
-      req={req} {...picked(data)} measure={measured(req, data)}
+      req={req} owned {...picked(data)} measure={measured(req, data)}
       compare={data.compare === 'previous' ? 'previous' : undefined}
       goal={Number(data.goal) > 0 ? Number(data.goal) : undefined}
       note={typeof data.note === 'string' && data.note.trim() ? data.note.trim() : undefined}
@@ -56,13 +69,17 @@ export const FigureWidget = async ({ req, widgetData: data }: WidgetServerProps)
 }
 
 export const RecordsWidget = async ({ req, widgetData: data }: WidgetServerProps) => {
-  if (!data?.source) return unset(req, 'A list')
-  return <Records req={req} {...picked(data)} list={chosen(data.list, data.source)} limit={Number(data.limit) || undefined} />
+  if (!data?.source) return unset(req, 'List')
+  const denied = await refused(req, 'list', 'List', data)
+  if (denied) return denied
+  return <Records req={req} owned {...picked(data)} list={chosen(data.list, data.source)} limit={Number(data.limit) || undefined} />
 }
 
 export const ChartWidget = async ({ req, widgetData: data }: WidgetServerProps) => {
-  if (!data?.source) return unset(req, 'A chart')
-  return <Chart req={req} {...picked(data)} measure={measured(req, data)} by={data.by === 'time' ? 'time' : chosen(data.by, data.source) ?? 'time'} series={chosen(data.series, data.source)} />
+  if (!data?.source) return unset(req, 'Chart')
+  const denied = await refused(req, 'chart', 'Chart', data)
+  if (denied) return denied
+  return <Chart req={req} owned {...picked(data)} measure={measured(req, data)} by={data.by === 'time' ? 'time' : chosen(data.by, data.source) ?? 'time'} series={chosen(data.series, data.source)} />
 }
 
 /** A ready-made widget: one of those the plugin was given, found by the slug it is drawn for. */
@@ -84,5 +101,6 @@ export const ReadyWidget = async ({ req, widgetData, widgetSlug }: WidgetServerP
   const own = { req, label, name: widget.slug, source, action, after, access, ...(overrideAccess ? { overrideAccess } : {}), ...show } as { req: typeof req; source: string }
   if (widget.kind === 'list') return <Records {...own} />
   if (widget.kind === 'chart') return <Chart {...own} />
-  return <Figure {...own} data={widgetData ?? {}} />
+  return <Figure {...own} data={dataFor(widget, widgetData)} />
 }
+

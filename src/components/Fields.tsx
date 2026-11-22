@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef } from 'react'
-import type { JSONFieldClientComponent, SelectFieldClientComponent } from 'payload'
+import type { JSONFieldClientProps, SelectFieldClientProps } from 'payload'
 import { QueryPresetsWhereField, SelectField, useAuth, useField } from '@payloadcms/ui'
 
 // The two fields of a widget's settings that Payload's own cannot be: which source, kept to what whoever is looking
@@ -10,7 +10,7 @@ import { QueryPresetsWhereField, SelectField, useAuth, useField } from '@payload
 type Collections = { collections?: Record<string, string> }
 
 /** The sources to choose from: those of a collection the signed-in user may read. */
-export const SourceField: SelectFieldClientComponent = props => {
+export const SourceField: React.FC<SelectFieldClientProps> = props => {
   const { collections = {} } = props as Collections
   const { permissions } = useAuth()
   const options = props.field.options.filter(option => {
@@ -27,7 +27,7 @@ export const Unseen = () => null
  * Which records, as the admin's lists are filtered: conditions that all hold, and alternatives of them. Payload's
  * builder asks a field called `relatedCollection` which collection it is for, so that is kept next to the source.
  */
-export const WhereField: JSONFieldClientComponent = props => {
+export const WhereField: React.FC<JSONFieldClientProps> = props => {
   const { collections = {} } = props as Collections
   const { value: source } = useField<string>({ path: 'source' })
   const { value: related, setValue: setRelated } = useField<string>({ path: 'relatedCollection' })

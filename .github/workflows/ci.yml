@@ -66,8 +66,10 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # Payload 4 is to be supported beside 3 in this major. Until then this says how far off it is, and a failure
-  # here does not fail the run: it is not to be made a required check.
+  # Payload 4 is supported beside 3 in this major, and this job passes on its beta. A beta may still break it, so a
+  # failure here does not fail the run, and it is not a required check. At 4.0.0: add '^4' to the payload of the
+  # `check` matrix (with Node 24 only, as 4 needs ^24.22.3, so an exclude of node 22 with it), make that row required,
+  # and remove this job.
   payload-next:
     name: Node 24, Next ^16.4.5, Payload beta (allowed to fail)
     runs-on: ubuntu-latest
@@ -90,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-      # Payload 4 asks for Node 24 or later
+      # Payload 4 asks for Node ^24.22.3 (or >=26.13.1); "24" is the latest 24
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -98,9 +100,11 @@ jobs:
       - name: Install Next ^16.4.5 and Payload beta
         run: |
           payload=$(npm view payload@beta version)
+          # the beta's @payloadcms/ui asks for React ^19.3.1, past the lockfile's
           pnpm add --save-dev --save-exact "next@^16.4.5" "payload@$payload" \
-            "@payloadcms/ui@$payload" "@payloadcms/next@$payload" "@payloadcms/db-postgres@$payload"
-          pnpm list next payload @payloadcms/ui @payloadcms/next @payloadcms/db-postgres
+            "@payloadcms/ui@$payload" "@payloadcms/next@$payload" "@payloadcms/db-postgres@$payload" \
+            "react@^19.3.1" "react-dom@^19.3.1"
+          pnpm list next payload @payloadcms/ui @payloadcms/next @payloadcms/db-postgres react
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build

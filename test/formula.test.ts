@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { CollectionConfig, FlattenedField } from 'payload'
-import { dateProblems, formulaProblems, measureProblems } from '../src/check'
+import { dateProblems, formulaProblems, inWords, measureProblems } from '../src/check'
 import { discovered } from '../src/discover'
 import { at, fieldsIn, found, holds, numberOf, pathsOf, valuesAt, worked, type Formula } from '../src/formula'
 import { combined, made, tallied, type Cell } from '../src/tally'
@@ -129,8 +129,16 @@ test('a formula that reads what is not there says so before anything is read', (
   assert.match(said({ when: { documentTyp: { equals: 'invoice' } }, then: 'totalAmount' })[0], /has no field called/)
   assert.match(said({ when: { documentType: { like: 'invoice' } }, then: 'totalAmount' })[0], /is not a way to compare/)
   assert.match(said({ add: ['items.price', 'extras.fee'] })[0], /rows of one array/)
-  assert.match(said({ subtract: ['totalAmount'] })[0], /A formula is a number/)
   assert.match(said({ times: ['totalAmount', 2] })[0], /A formula is a number/)
+
+  // a part that is wrong is told by where it is in the formula
+  const wrong = (formula: unknown) => formulaProblems('orders', fields, formula as Formula).map(problem => [problem.code, problem.path, inWords(problem)])
+  assert.deepEqual(wrong({ subtract: ['totalAmount'] }), [['bad-formula', 'subtract', 'In the formula, at "subtract": subtract takes two parts, not 1.']])
+  assert.deepEqual(wrong({ add: ['totalAmount', { divide: ['totalAmount', 2, 3] }] }), [['bad-formula', 'add.1.divide', 'In the formula, at "add.1.divide": divide takes two parts, not 3.']])
+  assert.deepEqual(wrong({ multiply: [] }), [['bad-formula', 'multiply', 'In the formula, at "multiply": multiply takes at least one part.']])
+  assert.deepEqual(wrong({ when: { documentType: { equals: 'invoice' } }, then: { times: [1] } }).map(([, path]) => path), ['then'])
+  assert.deepEqual(wrong({ when: { documentType: { equals: 'invoice' } } }).map(([, path]) => path), ['when'])
+  assert.deepEqual(wrong({ first: ['totalAmount', Number.NaN] }).map(([, path]) => path), ['first.1'])
 
   const orders = { slug: 'orders', measures: {} } as unknown as AnySource
   assert.deepEqual(measureProblems(orders, fields, { sum: 'items.price' }), [])

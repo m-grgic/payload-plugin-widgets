@@ -73,9 +73,12 @@ test('what was read is kept for whoever asked, for as long as it was said, and u
   await tallied(context, source, selection, amount)
   assert.equal(asked.times, 4)
 
+  // without a cache, what one request asks twice is read once for it, and again for the next request
   const plain = reading()
   await tallied(plain.context, source, selection, amount)
   await tallied(plain.context, source, selection, amount)
+  assert.equal(plain.asked.times, 1)
+  await tallied({ ...plain.context, req: {} } as unknown as Context, source, selection, amount)
   assert.equal(plain.asked.times, 2)
 })
 

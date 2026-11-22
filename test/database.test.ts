@@ -2,14 +2,26 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { after, before, test } from 'node:test'
 import { postgresAdapter } from '@payloadcms/db-postgres'
-import { buildConfig, createLocalReq, getPayload, type Payload, type PayloadRequest, type Where } from 'payload'
+import * as exported from 'payload'
+import { buildConfig, getPayload, type Payload, type PayloadRequest, type Where } from 'payload'
 import { contextFor } from '../src/context'
 import { widgetsPlugin } from '../src/index'
+import { settingsOf } from '../src/options'
 import { readChart, readFigure, type ChartPick, type FigurePick } from '../src/read'
+import { tallied, TimedOut } from '../src/tally'
+import { amountOf, Selection } from '../src/types'
 
 // What the database adds up has to come to what reading every record does. Each figure and chart below is read both
 // ways from a real Postgres and compared, and the ones the database can answer must not have read a single record.
 // Run where DATABASE_URI names a database that may be emptied: `DATABASE_URI=postgres://… pnpm test`.
+
+// A request of the local API, as a server component is handed one. Payload 3 makes it with `createLocalReq(args,
+// payload)`, which 4 no longer exports; 4 makes it with `createPayloadRequest({ ...args, payload })`. Payload 3 has a
+// `createPayloadRequest` too, of another kind (out of a web Request), so the two are told apart by `createLocalReq`.
+const createLocalReq = (args: { user?: PayloadRequest['user'] }, payload: Payload): Promise<PayloadRequest> => {
+  const of = exported as unknown as Record<string, (...args: unknown[]) => Promise<PayloadRequest>>
+  return typeof of.createLocalReq === 'function' ? of.createLocalReq(args, payload) : of.createPayloadRequest({ ...args, payload })
+}
 
 const uri = process.env.DATABASE_URI
 const skip = uri ? false : 'DATABASE_URI is not set'
@@ -63,6 +75,14 @@ before(async () => {
           access: { read: ({ req }) => { const team = req.headers?.get('x-team'); return team ? { team: { equals: team } } : false } },
           fields: [{ name: 'team', type: 'text' }, { name: 'hours', type: 'number' }],
         },
+        // more shops and kinds than a chart has bars for, and sums that come out the same
+        { slug: 'sales', fields: [
+          { name: 'shop', type: 'select', options: Array.from({ length: 30 }, (_, index) => `shop-${String(index + 1).padStart(2, '0')}`) },
+          { name: 'kind', type: 'select', options: Array.from({ length: 12 }, (_, index) => `kind-${index}`) },
+          { name: 'amount', type: 'number' },
+        ] },
+        // what a hook does to a record, only reading it does
+        { slug: 'notes', hooks: { beforeRead: [({ doc }) => doc] }, fields: [{ name: 'hours', type: 'number' }] },
         {
           slug: 'orders',
           fields: [
@@ -89,12 +109,18 @@ before(async () => {
       plugins: [widgetsPlugin({ timeZone: 'Europe/Zagreb', dashboard: false } as never)],
     }),
   })
-  const user = await payload.create({ collection: 'users', data: { email: 'test@example.com', password: 'test-only' } })
-  const customers = await Promise.all(['Ana', 'Ben', 'Cy'].map(name => payload.create({ collection: 'customers' as never, data: { name } as never })))
+  // the records are put in with the server's access, said out loud: Payload 4's local API no longer assumes it
+  const user = await payload.create({ overrideAccess: true, collection: 'users', data: { email: 'test@example.com', password: 'test-only' } })
+  const customers = await Promise.all(['Ana', 'Ben', 'Cy'].map(name => payload.create({ overrideAccess: true, collection: 'customers' as never, data: { name } as never })))
   seeded = orders(customers.map(customer => customer.id as number))
-  for (const data of seeded) await payload.create({ collection: 'orders' as never, data: data as never })
+  for (const data of seeded) await payload.create({ overrideAccess: true, collection: 'orders' as never, data: data as never })
   req = await createLocalReq({ user: { ...user, collection: 'users' } as never }, payload)
-  for (const [team, hours] of [['north', 2], ['north', null], ['north', 5], ['south', 40]] as const) await payload.create({ collection: 'tickets' as never, data: { team, hours } as never })
+  for (const [team, hours] of [['north', 2], ['north', null], ['north', 5], ['south', 40]] as const) await payload.create({ overrideAccess: true, collection: 'tickets' as never, data: { team, hours } as never })
+  for (let index = 0; index < 240; index += 1) {
+    const shop = index % 17 === 0 ? null : `shop-${String(1 + dice(30)).padStart(2, '0')}`
+    await payload.create({ overrideAccess: true, collection: 'sales' as never, data: { shop, kind: some(`kind-${dice(12)}`, 9), amount: some(1 + dice(6), 7) } as never })
+  }
+  for (const hours of [1, 2, 4]) await payload.create({ overrideAccess: true, collection: 'notes' as never, data: { hours } as never })
 
   const { find } = payload
   payload.find = ((args: Parameters<typeof find>[0]) => {
@@ -195,6 +221,81 @@ test('what an access reads of the request, it reads the same both ways', { skip,
     const { records, database } = await both(sums => readFigure({ ...contextFor(north), sums }, { source: 'tickets', measure }))
     assert.deepEqual(plain(database), plain(records))
     assert.equal(records.amount, value, JSON.stringify(measure))
+  }
+})
+
+const sales = (pick: Omit<ChartPick, 'source'>, limits?: { groups?: number }) =>
+  both(sums => readChart({ ...contextFor(req), sums, ...(limits ? { limits } : {}) }, { source: 'sales', ...pick }))
+
+const MANY_GROUPS: Record<string, [Omit<ChartPick, 'source'>, { groups?: number }?]> = {
+  'a count by a field of thirty': [{ by: 'shop' }],
+  'a sum by it': [{ measure: 'amount', by: 'shop' }],
+  'an average by it, which ranks by the average': [{ measure: { avg: 'amount' }, by: 'shop' }],
+  'the least by it': [{ measure: { min: 'amount' }, by: 'shop' }],
+  'by it and a series of twelve': [{ measure: 'amount', by: 'shop', series: 'kind' }],
+  'several measures by it, ranked by the first': [{ measure: ['amount', 'count', { max: 'amount' }], by: 'shop' }],
+  'by it, kept to three groups': [{ measure: 'amount', by: 'shop' }, { groups: 3 }],
+}
+
+for (const [name, [pick, limits]] of Object.entries(MANY_GROUPS)) {
+  test(`the database draws what the records do, of more than there are bars for: ${name}`, { skip, timeout: 60000 }, async () => {
+    const { records, database, reads } = await sales(pick, limits)
+    assert.deepEqual(plain(database), plain(records))
+    assert.equal(reads, 0, 'the database was to be asked, and the records were read')
+    // the most there are bars for, what has no shop among them if it comes to as much, and all the others as one
+    const labels = records.bars.map(bar => String(bar.label))
+    const named = labels.filter(label => /^shop-/.test(label))
+    if (limits?.groups) assert.equal(named.length, limits.groups, JSON.stringify(labels))
+    else assert.equal(labels.length, 9, JSON.stringify(labels))
+    assert.equal(labels.at(-1), 'Other', JSON.stringify(labels))
+  })
+}
+
+test('what the database is given back, many groups or few, is no more than is drawn', { skip, timeout: 60000 }, async () => {
+  const source = settingsOf(payload).sources.sales
+  const { over } = await tallied({ ...contextFor(req), sums: 'database' }, source, new Selection(), amountOf('amount', 'number', 'sum'), [{ field: 'shop' }, { field: 'kind' }], [8, 5])
+  const cells = over(0, 1)
+  // 8 shops, none and the rest; 5 kinds, none and the rest
+  assert.ok(cells.length <= 10 * 7, String(cells.length))
+  const all = await tallied({ ...contextFor(req), sums: 'records' }, source, new Selection(), amountOf('amount', 'number', 'sum'), [{ field: 'shop' }, { field: 'kind' }], [8, 5])
+  assert.deepEqual(plain(over(0, 1).sort((a, b) => a.keys.join().localeCompare(b.keys.join()))), plain(all.over(0, 1).sort((a, b) => a.keys.join().localeCompare(b.keys.join()))))
+})
+
+test('the database gives up on a read that takes longer than it is given, and the records are not read instead', { skip, timeout: 60000 }, async () => {
+  const { Client } = createRequire(import.meta.resolve('@payloadcms/db-postgres'))('pg') as { Client: new (options: object) => { connect(): Promise<void>; query(text: string): Promise<unknown>; end(): Promise<void> } }
+  const holder = new Client({ connectionString: uri })
+  await holder.connect()
+  // the table is held by somebody else, so that the count waits on it
+  await holder.query('begin; lock table sales in access exclusive mode;')
+  try {
+    const source = settingsOf(payload).sources.sales
+    reads.count = 0
+    await assert.rejects(
+      tallied({ ...contextFor(req), sums: 'database', limits: { timeoutMs: 300 } }, source, new Selection(), amountOf('amount', 'number', 'sum'), [{ field: 'shop' }]),
+      (error: unknown) => error instanceof TimedOut && error.problems[0].code === 'timed-out',
+    )
+  } finally {
+    await holder.query('rollback;')
+    await holder.end()
+  }
+  // and the pool's connections read as long as they like again
+  const later = await tallied({ ...contextFor(req), sums: 'database' }, settingsOf(payload).sources.sales, new Selection(), amountOf('amount', 'number', 'sum'))
+  assert.ok(later.over().length)
+})
+
+test('a collection with a hook that changes what is read is added up from the records', { skip, timeout: 60000 }, async () => {
+  const counted = { notes: 0 }
+  const { find } = payload
+  payload.find = ((args: Parameters<typeof find>[0]) => {
+    if ((args.collection as string) === 'notes') counted.notes += 1
+    return find.call(payload, args)
+  }) as typeof find
+  try {
+    const figure = await readFigure({ ...contextFor(req), sums: 'database' }, { source: 'notes', measure: { sum: 'hours' } })
+    assert.equal(figure.amount, 7)
+    assert.ok(counted.notes > 0, 'the records were to be read')
+  } finally {
+    payload.find = find
   }
 })
 

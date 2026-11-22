@@ -1,11 +1,12 @@
-import type { Access, CollectionSlug, Where } from 'payload'
-import { dateProblems, figureProblems, measureProblems, seriesProblems, Misconfigured, nameProblems, noSource, Unavailable, isDate, whereProblems, type Problem } from './check'
+import type { Access, CollectionSlug, FlattenedField, Where } from 'payload'
+import { dateProblems, figureProblems, measureAt, measureProblems, seriesProblems, Misconfigured, nameProblems, noSource, timedOut, Unavailable, isDate, whereProblems, type Problem } from './check'
 import { accessTo, readable, sourceCalled } from './options'
 import { after } from './time'
 import { months, timed as atMoments } from './when'
 import { fieldsIn, found as located } from './formula'
-import { countOf, made, tallied, type Cell, type Dim } from './tally'
-import { amountOf, CALLED, calcOf, labelled, MANY, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
+import { once } from './memo'
+import { countOf, made, ranking, recordsOf, REST, tallied, TimedOut, type Cell, type Dim, type Keep } from './tally'
+import { amountOf, CALLED, calcOf, labelled, nameOf, reckoned, selected, Selection, shown, type Amount, type AnySource, type Context, type Format, type Label, type ListReading, type Measure, type More, type Period, type Reading, type Reckoned, type Tone } from './types'
 
 // What a widget shows, read out of a source: a figure, a short list, or bars over time or by group.
 // The same three serve the dashboard and any other page, which may pass a scope: one project, one client.
@@ -68,7 +69,7 @@ export interface Series { key: string; label: string; total: string; peak: numbe
  */
 export interface ChartReading { note: string; href?: string; bars: Bar[]; empty: string; series?: Series[]; stacked?: boolean }
 
-export { Misconfigured, Unavailable }
+export { Misconfigured, TimedOut, Unavailable }
 
 const DAY = /^\d{4}-\d{2}-\d{2}/
 
@@ -118,22 +119,50 @@ const from = async (asked: Context, pick: Pick & Elevated, kind: 'figure' | 'lis
 const dateOf = (source: AnySource, pick: Pick): string => (typeof pick.date === 'string' && /^[\w.]+$/.test(pick.date) ? pick.date : source.date ?? 'createdAt')
 
 /** Said before anything is read: what a widget picks that its source or its collection does not have. */
-const sound = (context: Context, source: AnySource, pick: Omit<FigurePick, 'measure'> & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
+const sound = async (context: Context, source: AnySource, pick: Omit<FigurePick, 'measure'> & ListPick & ChartPick, kind: 'figure' | 'list' | 'chart') => {
   const fields = context.payload.collections[source.slug as CollectionSlug]?.config.flattenedFields ?? []
+  // what a filter or a date is said to lack names only what whoever asks may read: Payload refuses the rest as it
+  // refuses a field that is not there, and a hint should not tell them it is
+  const theirs = context.as.overrideAccess ? fields : await readableFields(context.req, source.slug, fields)
   const scopes: Problem[] = Object.entries(pick.scope ?? {})
     .filter(([name, id]) => id !== undefined && id !== null && !source.scopes?.[name])
     // better nothing than everybody's figures on the page of one project
-    .map(([name]) => ({ text: '{source} cannot be narrowed to a "{name}"', vars: { source: source.slug, name } }))
+    .map(([name]) => ({ code: 'no-scope' as const, text: '{source} cannot be narrowed to a "{name}"', vars: { source: source.slug, name } }))
   const problems = [
     ...nameProblems(source, pick, kind), ...scopes,
-    ...whereProblems(source.slug, fields, pick.where),
-    ...(kind === 'list' ? [] : [pick.measure].flat().flatMap(measure => measureProblems(source, fields, measure))),
+    ...whereProblems(source.slug, theirs, pick.where),
+    ...(kind === 'list' ? [] : [pick.measure].flat().flatMap((measure, index) => measureProblems(source, fields, measure, measureAt(pick.measure, index)))),
     ...(kind === 'chart' ? seriesProblems(pick) : []),
     ...(kind === 'figure' ? figureProblems(pick as FigurePick) : []),
-    ...dateProblems(source.slug, fields, typeof pick.date === 'string' ? pick.date : undefined),
+    ...dateProblems(source.slug, theirs, typeof pick.date === 'string' ? pick.date : undefined),
   ]
   if (problems.length) throw new Misconfigured(problems)
 }
+
+/** The fields of a collection whoever makes a request may read, as Payload asks it of a field: once a request. */
+const readableFields = (req: Context['req'], slug: string, fields: FlattenedField[]): Promise<FlattenedField[]> => once(req, ['fields', slug], async () => {
+  // Payload 4 hands a field's access the collection it is of as well; 3 hands it only the request
+  const collection = req?.payload.collections[slug as CollectionSlug]?.config
+  const of = async (all: FlattenedField[]): Promise<FlattenedField[]> => {
+    const left: FlattenedField[] = []
+    for (const field of all) {
+      const read = (field as { access?: { read?: (args: { req: unknown; collection?: unknown }) => unknown } }).access?.read
+      if (read) {
+        let may = false
+        try {
+          may = !!await read({ req, collection })
+        } catch {
+          may = false
+        }
+        if (!may) continue
+      }
+      const inner = (field as { flattenedFields?: FlattenedField[] }).flattenedFields
+      left.push(inner ? { ...field, flattenedFields: await of(inner) } as FlattenedField : field)
+    }
+    return left
+  }
+  return of(fields)
+})
 
 const fieldsOf = (context: Context, source: AnySource) => context.payload.collections[source.slug as CollectionSlug]?.config.flattenedFields ?? []
 
@@ -206,7 +235,12 @@ export const titleOf = (context: Context, pick: Omit<FigurePick, 'measure'> & Li
   ].filter(Boolean).join(' · ')
 }
 
-/** The period before one: as long, and ending where it starts; a month or a year to date is set against the same days of the one before. */
+/**
+ * The period before one: as long, and ending where it starts; a month or a year to date is set against the same days
+ * of the one before. Those are not always as many: on 31 March this month is set against the whole of February,
+ * which ends on its 28th. That is meant: a span as long would start in January, or run into this month, and
+ * "on last month" would then not be last month.
+ */
 const before = (context: Context, pick: Pick): { from: string; to: string } | undefined => {
   const { start, end } = span(context, pick)
   if (!start) return undefined
@@ -224,21 +258,54 @@ const changed = (context: Context, now: number, then: number) => {
   return `${share > 0 ? '+' : share < 0 ? '−' : ''}${context.number(Math.abs(share))}%`
 }
 
-export const readFigure = async (asked: Context, pick: FigurePick): Promise<Reading & More & { tone: Tone }> => {
+/**
+ * What is read for a widget, or a notice that it took longer than `limits.timeoutMs`: the database is told to give
+ * up where it adds up (see ./tally), and whatever else is still being read is let be and its answer passed over.
+ */
+const bounded = async <T>(asked: Context, what: string, read: () => Promise<T>): Promise<T> => {
+  const ms = asked.limits?.timeoutMs
+  if (!ms) return read()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimedOut(ms)), ms)
+  })
+  try {
+    return await Promise.race([read(), late])
+  } catch (error) {
+    // by name as well: what threw it may be another copy of the plugin
+    if (error instanceof TimedOut || timedOut(error)) asked.payload.logger.warn(`widgets: ${what} took longer to read than the ${ms} ms it is given`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const sourceName = (pick: Pick) => (typeof pick.source === 'string' ? pick.source : pick.source.slug)
+
+export const readFigure = (asked: Context, pick: FigurePick): Promise<Reading & More & { tone: Tone }> =>
+  bounded(asked, `a figure of ${sourceName(pick)}`, () => figureOf(asked, pick))
+
+const figureOf = async (asked: Context, pick: FigurePick): Promise<Reading & More & { tone: Tone }> => {
   const { source, narrowed, context, linked } = await from(asked, pick, 'figure')
-  sound(context, source, pick, 'figure')
+  await sound(context, source, pick, 'figure')
   const measure = measureOf(context, source, pick.measure)
-  if (!measure) throw new Misconfigured([{ text: '{source} has no measure called "{name}"', vars: { source: source.slug, name: String(pick.measure ?? 'count') } }])
+  if (!measure) throw new Misconfigured([{ code: 'no-measure', text: '{source} has no measure called "{name}"', vars: { source: source.slug, name: String(pick.measure ?? 'count') } }])
   const { selection, filter } = chosen(context, source, pick, measure.filter, narrowed)
 
-  const reading = await measure.read(context, selection, source)
+  // what else it shows is read alongside: the period before, and the figure over time
+  const goal = Number(pick.goal) > 0 ? Number(pick.goal) : undefined
+  const drawn = pick.as === 'sparkline'
+  const earlier = pick.compare ? before(context, pick) : undefined
+  const [reading, previous, line] = await Promise.all([
+    measure.read(context, selection, source),
+    earlier ? measure.read(context, chosen(context, source, { ...pick, period: 'custom', ...earlier }, measure.filter, narrowed).selection, source) : undefined,
+    drawn ? chartOf(asked, { ...pick, by: 'time' }) : undefined,
+  ])
   // a plain count says what its filter finds worth saying
   const remark = measure.counts && filter?.remark ? await filter.remark(context, Number(reading.value), selection, source) : {}
   const plain: Reading & { tone: Tone } = { tone: 'calm', href: context.list(source.slug, selection.filter), ...reading, ...remark }
   // the list behind it is the collection's own: not for whoever only this figure is for
   if (!linked) delete plain.href
-  const goal = Number(pick.goal) > 0 ? Number(pick.goal) : undefined
-  const drawn = pick.as === 'sparkline'
   if (!pick.compare && !goal && !drawn && !pick.note) return plain
 
   const now = reading.amount
@@ -252,9 +319,8 @@ export const readFigure = async (asked: Context, pick: FigurePick): Promise<Read
   const vars: Record<string, string> = { value: plain.value, note: plain.note ?? '' }
   const usual: string[] = []
 
-  const earlier = pick.compare ? before(context, pick) : undefined
-  if (earlier && now !== undefined) {
-    const then = await measure.read(context, chosen(context, source, { ...pick, period: 'custom', ...earlier }, measure.filter, narrowed).selection, source)
+  if (previous && now !== undefined) {
+    const then = previous
     const amount = then.amount ?? 0
     more.previous = { value: then.value, amount }
     more.trend = now > amount ? 'up' : now < amount ? 'down' : 'flat'
@@ -269,15 +335,18 @@ export const readFigure = async (asked: Context, pick: FigurePick): Promise<Read
     vars.left = written(Math.max(0, goal - now))
     usual.push(context.t('{percent} of {goal}', vars))
   }
-  if (drawn) more.series = (await readChart(asked, { ...pick, by: 'time' })).bars
+  if (line) more.series = line.bars
 
   const note = pick.note ? context.t(pick.note, vars) : usual.length ? usual.join(' · ') : plain.note
   return { ...plain, ...more, ...(note ? { note } : {}) }
 }
 
-export const readList = async (asked: Context, pick: ListPick): Promise<ListReading & { href: string }> => {
+export const readList = (asked: Context, pick: ListPick): Promise<ListReading & { href: string }> =>
+  bounded(asked, `a list of ${sourceName(pick)}`, () => listOf(asked, pick))
+
+const listOf = async (asked: Context, pick: ListPick): Promise<ListReading & { href: string }> => {
   const { source, narrowed, context } = await from(asked, pick, 'list')
-  sound(context, source, pick, 'list')
+  await sound(context, source, pick, 'list')
   const list = source.lists?.[pick.list ?? Object.keys(source.lists ?? {})[0]]
   if (!list) throw new Misconfigured([{ text: '{source} has no list to show', vars: { source: source.slug } }])
   const { selection } = chosen(context, source, pick, list.filter, narrowed)
@@ -305,9 +374,10 @@ const called = async (context: Context, source: AnySource, field: string, keys: 
   if ((config?.type === 'relationship' || config?.type === 'upload') && typeof config.relationTo === 'string' && keys.length) {
     const related = config.relationTo as CollectionSlug
     const title = context.payload.collections[related].config.admin.useAsTitle ?? 'id'
-    // read as the person looking: what they may not open stays a number
+    // read as the person looking, also for a widget that reads its own records with the server's access: what they
+    // may not open stays a number
     const found = await context.payload.find({
-      ...context.as, collection: related, pagination: false, limit: keys.length,
+      ...context.as, overrideAccess: false, collection: related, pagination: false, limit: keys.length,
       where: { id: { in: keys } }, select: { [title]: true } as never,
     }).catch(() => ({ docs: [] }))
     for (const doc of found.docs as unknown as Record<string, unknown>[]) names.set(String(doc.id), String(doc[title] ?? doc.id))
@@ -321,9 +391,12 @@ const SERIES = 5
 
 type Row = Record<string, unknown>
 
-export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartReading> => {
+export const readChart = (asked: Context, pick: ChartPick): Promise<ChartReading> =>
+  bounded(asked, `a chart of ${sourceName(pick)}`, () => chartOf(asked, pick))
+
+const chartOf = async (asked: Context, pick: ChartPick): Promise<ChartReading> => {
   const { source, narrowed, context, linked } = await from(asked, pick, 'chart')
-  sound(context, source, pick, 'chart')
+  await sound(context, source, pick, 'chart')
   const picked = [pick.measure].flat()
   const measures = picked.map(one => measureOf(context, source, one))
   const lacking = measures.findIndex(measure => !measure?.amount)
@@ -364,10 +437,14 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
 
   // money is drawn in one currency; what is in another is said, not added
   const main = context.currency.toUpperCase()
-  const read = async (measure: Measure) => {
+  // of a field, only what is drawn is told apart, the rest is one: the first few values, by what the first measure
+  // makes of them; the other measures are told apart by the same values, to stand beside them. A date tells every
+  // day or month apart.
+  const keepOf = (bars?: string[]): Keep[] => [by ? bars ?? MOST : undefined, ...(apart ? [SERIES] : [])]
+  const read = async (measure: Measure, keep: Keep[]) => {
     const amount = measure.amount as Amount<Row>
     const { selection } = chosen(context, source, timed, measure.filter, narrowed)
-    const tally = await tallied(context, source, selection, amount, dims)
+    const tally = await tallied(context, source, selection, amount, dims, keep)
     const over = (...which: number[]) => (amount.format === 'money' ? tally.over(...which).filter(cell => cell.currency === main) : tally.over(...which))
     const found = countOf(over())
     return {
@@ -377,8 +454,12 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
       show: (value: number) => shown(context, amount.format, new Map([[amount.format === 'money' ? main : '', value]])),
     }
   }
-  // each measure has its own records: one may count only some of them
-  const all = await Promise.all(measures.map(measure => read(measure as Measure)))
+  // each measure has its own records: one may count only some of them. Split by a field, the others wait for the
+  // first, which says what the bars are.
+  const [head, ...others] = measures as Measure[]
+  const all = by && others.length
+    ? await read(head, keepOf()).then(async one => [one, ...await Promise.all(others.map(measure => read(measure, keepOf(ranking(one.amount.how, one.over(0)).slice(0, MOST).map(([key]) => key)))))])
+    : await Promise.all((measures as Measure[]).map(measure => read(measure, keepOf())))
   const [first] = all
   const { selection } = first
 
@@ -388,7 +469,7 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     all.length > 1 ? '' : first.show(first.total),
     left ? context.t('{count} in another currency left out', { count: left }) : '',
     // more than can be read at once: said, so the chart is not taken for all of them
-    all.some(one => one.cut) ? context.t('Only the first {count} are counted', { count: context.number(MANY) }) : '',
+    all.some(one => one.cut) ? context.t('Only the first {count} are counted', { count: context.number(recordsOf(context)) }) : '',
   ].filter(Boolean).join(' · ')
   const href = linked ? context.list(source.slug, selection.filter) : undefined
   const empty = context.t('Nothing to show yet')
@@ -400,9 +481,9 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     for (const cell of cells) each.set(cell.keys[heading], [...(each.get(cell.keys[heading]) ?? []), cell])
     return each
   }
-  const ranked = (cells: Cell[]) => [...under(cells, 0)].map(([key, mine]) => [key, made(first.amount.how, mine)] as const)
-    // the most first, and of two that come to the same the one that is first by name, however they were read
-    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+  // the most first, and of two that come to the same the one that is first by name, however they were read; what
+  // the tally did not tell apart is none of them, and always among what is left over
+  const ranked = (cells: Cell[]) => ranking(first.amount.how, cells)
 
   // what is drawn at once: the measures, or the records of the one measure told apart by what they have in a field.
   // `cells` are what each comes to bar by bar.
@@ -415,7 +496,7 @@ export const readChart = async (asked: Context, pick: ChartPick): Promise<ChartR
     const top = most.slice(0, SERIES)
     const names = await called(context, source, apart, top.map(([key]) => key).filter(Boolean))
     const each = under(first.over(0, 1), 1)
-    const rest = most.slice(SERIES).flatMap(([key]) => each.get(key) ?? [])
+    const rest = [...most.slice(SERIES).map(([key]) => key), REST].flatMap(key => each.get(key) ?? [])
     parts = [
       ...top.map(([key, total]) => ({ key: key || '_none', label: key ? names.get(key) ?? `#${key}` : context.t('None'), total, cells: each.get(key) ?? [], amount: first.amount, show: first.show })),
       // what is left over is made one the same way: the average of the rest, not the sum of their averages

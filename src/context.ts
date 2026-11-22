@@ -41,6 +41,8 @@ export const contextFor = (req: PayloadRequest, data: Record<string, unknown> = 
     zone,
     sums: settings.sums,
     ...(settings.cache ? { cache: settings.cache } : {}),
+    // settings made before there were limits have none
+    ...(settings.limits && Object.keys(settings.limits).length ? { limits: settings.limits } : {}),
     currency: settings.currency,
     data,
     list: (slug: CollectionSlug, where?: Where) => `${admin}/collections/${slug}${where ? `?${query(where, 'where').join('&')}` : ''}`,

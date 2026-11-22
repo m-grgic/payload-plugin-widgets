@@ -7,7 +7,7 @@
  * 1. The variables below, anywhere a tile can inherit them from. Left alone, each is the admin's own, so the tiles
  *    follow its theme.
  *
- *      :root { --widgets-accent: var(--theme-warning-500); --widgets-radius: 0; }
+ *      :root { --widgets-accent: var(--theme-warning-500, var(--color-icon-warning)); --widgets-radius: 0; }
  *
  *      --widgets-accent        the dot of a tile that is doing fine, and a chart's bars
  *      --widgets-warn          the dot of one that wants attention
@@ -22,18 +22,39 @@
  *      --widgets-label         what it is called
  *      --widgets-label-size, --widgets-value-size, --widgets-text-size, --widgets-note-size
  *      --widgets-chart-height  how tall columns and a line are drawn, and --widgets-spark-height the line under a figure
- *      --widgets-series-1 … -6 the colours of a chart's series, the first being --widgets-accent where it is not given
+ *      --widgets-series-1 … -8 the colours of a chart's series, in this order; a ninth is drawn as the first again
+ *
+ *    Left alone, the series are drawn in eight colours of the plugin's own, one set for the light theme and one for
+ *    the dark. They are told apart with the common kinds of colour blindness (OKLab ΔE ≥ 9.7 between any two in
+ *    light, ≥ 10 in dark, as simulated after Machado 2009) and stand out at least 3:1 against the tile.
+ *
+ *                              light (on #ffffff)          dark (on #141414)
+ *      --widgets-series-1      --widgets-accent, else the admin's blue #1587ba (4.0:1; 4.6:1)
+ *      --widgets-series-2      the admin's orange #b96c0d (4.0:1; 4.6:1)
+ *      --widgets-series-3      #7a3fd0 violet (6.1:1)        #8b56f9 (4.2:1)
+ *      --widgets-series-4      #52915f green (3.8:1)         #71ab88 (6.9:1)
+ *      --widgets-series-5      #8c186a plum (8.6:1)          #a73c7a (3.1:1)
+ *      --widgets-series-6      #766200 olive (6.0:1)         #ba9f17 (7.1:1)
+ *      --widgets-series-7      #3647a4 indigo (8.1:1)        #5657bc (3.1:1)
+ *      --widgets-series-8      #b96bf0 lilac (3.3:1)         #d0a4fb (9.1:1)
+ *
+ *    Red is left out: it says that something is wrong.
  *
  * 2. The classes: `.widgets-tile` with `__label`, `__value`, `__progress`, `__note`, `__trend`, `__sign`, `__head`, `__rows`,
- *    `__late`, `__action`, `__add`; `.widgets-chart` with `__label`, `__bar`, `__value`; `.widgets-columns` with `__bar`,
- *    `__label`; `.widgets-line` with `__plot`, `__stroke`, `__area`, `__point`, `__labels`; `.widgets-legend` with `__mark`, `__total`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
+ *    `__late`, `__action`, `__add`, `__field`, `__submit`, `__done`; `.widgets-chart` with `__label`, `__bar`, `__value`;
+ *    `.widgets-columns` with `__bar`, `__label`; `.widgets-line` with `__plot`, `__stroke`, `__area`, `__zero`, `__point`,
+ *    `__dot`, `__labels`; `.widgets-scale` with `__tick` (what the top of columns or a line comes to, and nothing);
+ *    `.widgets-tip` with `__label`, `__value`, `__mark` (what a column or a point comes to, on the pointer and on focus);
+ *    `.widgets-legend` with `__mark`, `__total`, `__note`; `.widgets-quick` and `.widgets-note`. They keep their names.
+ *    Everything here is in a layer, so a rule of the project's own wins whatever its selector.
  *
  * 3. What each tile says of itself: `data-kind` (figure, list, chart, notice, note), `data-tone` (calm, warn, bad),
  *    `data-view` (number, progress, sparkline; bars, columns, line), on a figure that is compared `data-trend` (up,
  *    down, flat), on a notice `data-notice` (error, denied, unset) and, on a ready-made widget, `data-widget` with its slug.
+ *    In a chart, what goes below nothing has `data-signed` on what it is drawn in, and `data-below` on its part.
  *
  *      .widgets-tile[data-widget='unpaid-invoices'] { --widgets-value-size: 40px; }
- *      .widgets-tile[data-tone='bad'] { --widgets-border: var(--theme-error-500); }
+ *      .widgets-tile[data-tone='bad'] { --widgets-border: var(--theme-error-500, var(--color-icon-danger)); }
  */
 /* above the admin's own styles, below anything a project writes outside a layer */
 @layer payload-default, widgets;
@@ -45,17 +66,17 @@
     /* a dashboard widget fills the cell it is given */
     height: 100%;
     min-width: 0;
-    padding: var(--widgets-padding, calc(var(--base) * 0.9));
-    background: var(--widgets-bg, var(--theme-bg));
-    border: 1px solid var(--widgets-border, var(--theme-border-color));
-    border-radius: var(--widgets-radius, var(--style-radius-m));
-    color: var(--widgets-text, var(--theme-text));
+    padding: var(--widgets-padding, calc(var(--base, 1.25rem) * 0.9));
+    background: var(--widgets-bg, var(--theme-bg, var(--color-bg)));
+    border: 1px solid var(--widgets-border, var(--theme-border-color, var(--color-border)));
+    border-radius: var(--widgets-radius, var(--style-radius-m, var(--radius-medium)));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     text-decoration: none;
     transition: border-color 100ms, background 100ms;
   }
   .widgets-tile:hover {
-    background: var(--widgets-bg-hover, var(--theme-elevation-50));
-    border-color: var(--widgets-border-hover, var(--theme-elevation-300));
+    background: var(--widgets-bg-hover, var(--theme-elevation-50, var(--color-bg-hover)));
+    border-color: var(--widgets-border-hover, var(--theme-elevation-300, var(--color-border-strong)));
   }
   .widgets-tile:focus-visible {
     outline: var(--accessibility-outline);
@@ -63,11 +84,11 @@
   }
   /* a tile that is not one link as a whole: a list, a chart, a figure with something under it */
   .widgets-tile--plain {
-    gap: calc(var(--base) * 0.5);
+    gap: calc(var(--base, 1.25rem) * 0.5);
   }
   .widgets-tile--plain:hover {
-    background: var(--widgets-bg, var(--theme-bg));
-    border-color: var(--widgets-border, var(--theme-border-color));
+    background: var(--widgets-bg, var(--theme-bg, var(--color-bg)));
+    border-color: var(--widgets-border, var(--theme-border-color, var(--color-border)));
   }
   /* one that only says why there is nothing to show */
   .widgets-tile[data-kind=notice] {
@@ -89,14 +110,14 @@
     stroke-width: 1.5;
     stroke-linecap: round;
     stroke-linejoin: round;
-    color: var(--theme-elevation-500);
+    color: var(--theme-elevation-500, var(--color-text-tertiary));
   }
   /* what went wrong is told by the colour of what is wrong as well */
   .widgets-tile[data-notice=error] {
-    border-color: var(--theme-error-300);
+    border-color: var(--theme-error-300, var(--color-border-danger));
   }
   .widgets-tile[data-notice=error] .widgets-tile__sign {
-    color: var(--widgets-bad, var(--theme-error-500));
+    color: var(--widgets-bad, var(--theme-error-500, var(--color-icon-danger)));
   }
   .widgets-tile__label {
     display: flex;
@@ -106,23 +127,28 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--widgets-label, var(--theme-elevation-550));
+    color: var(--widgets-label, var(--theme-elevation-550, var(--color-text-secondary)));
   }
   .widgets-tile__label:before {
     content: "";
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--widgets-accent, var(--theme-success-500));
+    background: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
   }
   .widgets-tile[data-tone=warn] .widgets-tile__label:before {
-    background: var(--widgets-warn, var(--theme-warning-500));
+    background: var(--widgets-warn, var(--theme-warning-500, var(--color-icon-warning)));
   }
   .widgets-tile[data-tone=bad] .widgets-tile__label:before {
-    background: var(--widgets-bad, var(--theme-error-500));
+    background: var(--widgets-bad, var(--theme-error-500, var(--color-icon-danger)));
+  }
+  /* a figure is as wide as its cell, so its number can be as large as there is room for */
+  .widgets-tile[data-kind=figure] {
+    container-type: inline-size;
   }
   .widgets-tile__value {
-    font-size: var(--widgets-value-size, 28px);
+    font-size: var(--widgets-value-size, clamp(18px, 12cqi, 28px));
+    overflow-wrap: anywhere;
     font-weight: 700;
     letter-spacing: -0.03em;
     line-height: 1.15;
@@ -135,17 +161,17 @@
     margin-block: 4px 2px;
     margin-inline: 0;
     border-radius: 3px;
-    background: var(--theme-elevation-100);
+    background: var(--theme-elevation-100, var(--color-bg-secondary));
   }
   .widgets-tile__progress span {
     display: block;
     height: 100%;
     border-radius: 3px;
-    background: var(--widgets-accent, var(--theme-success-500));
+    background: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
   }
   .widgets-tile__note {
     font-size: var(--widgets-note-size, 13px);
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
   }
   /* which way a figure that is compared went, before what the note says of it */
   .widgets-tile[data-trend] .widgets-tile__trend {
@@ -175,7 +201,7 @@
     text-decoration: none;
   }
   .widgets-tile__action {
-    color: var(--widgets-link, var(--theme-success-600));
+    color: var(--widgets-link, var(--theme-success-600, var(--color-text-success)));
     font-size: var(--widgets-note-size, 13px);
     font-weight: 600;
     text-decoration: none;
@@ -213,7 +239,7 @@
     padding: 0;
   }
   .widgets-tile__rows li + li {
-    border-block-start: 1px solid var(--widgets-border, var(--theme-border-color));
+    border-block-start: 1px solid var(--widgets-border, var(--theme-border-color, var(--color-border)));
   }
   .widgets-tile__rows a {
     display: flex;
@@ -221,7 +247,7 @@
     gap: 16px;
     padding: 9px 0;
     font-size: var(--widgets-text-size, 14px);
-    color: var(--widgets-text, var(--theme-text));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     text-decoration: none;
   }
   .widgets-tile__rows a:hover span:first-child {
@@ -235,31 +261,69 @@
   }
   .widgets-tile__rows span:last-child {
     flex-shrink: 0;
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
     font-variant-numeric: tabular-nums;
   }
   .widgets-tile__rows .widgets-tile__late {
-    color: var(--widgets-bad, var(--theme-error-600));
+    color: var(--widgets-bad, var(--theme-error-600, var(--color-text-danger)));
     font-weight: 600;
   }
   /* a box at the foot of a list that adds one by its title */
+  .widgets-tile__field {
+    display: flex;
+    gap: 6px;
+  }
   .widgets-tile__add input {
+    flex: 1;
+    min-width: 0;
     width: 100%;
     padding: 6px 8px;
     background: transparent;
-    border: 1px dashed var(--widgets-border, var(--theme-border-color));
-    border-radius: var(--style-radius-s);
-    color: var(--widgets-text, var(--theme-text));
+    border: 1px dashed var(--widgets-border, var(--theme-border-color, var(--color-border)));
+    border-radius: var(--style-radius-s, var(--radius-chip));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     font: inherit;
     font-size: var(--widgets-note-size, 13px);
   }
   .widgets-tile__add input:focus {
-    background: var(--theme-input-bg);
+    background: var(--theme-input-bg, var(--color-bg));
     border-style: solid;
+  }
+  .widgets-tile__submit {
+    flex: none;
+    padding: 6px 10px;
+    background: var(--theme-elevation-50, var(--color-bg-hover));
+    border: 1px solid var(--widgets-border, var(--theme-border-color, var(--color-border)));
+    border-radius: var(--style-radius-s, var(--radius-chip));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
+    font: inherit;
+    font-size: var(--widgets-note-size, 13px);
+    cursor: pointer;
+  }
+  .widgets-tile__submit:hover {
+    background: var(--theme-elevation-100, var(--color-bg-secondary));
+  }
+  .widgets-tile__submit:focus-visible {
+    outline: var(--accessibility-outline);
+    outline-offset: 2px;
+  }
+  .widgets-tile__submit:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+  /* that one was added: empty, and of no height, until it is; never hidden, or it would not be heard */
+  .widgets-tile__done {
+    margin: 0;
+    margin-block-start: 4px;
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
+    font-size: var(--widgets-note-size, 13px);
+  }
+  .widgets-tile__done:empty {
+    margin: 0;
   }
   .widgets-tile__error {
     margin: 0;
-    color: var(--widgets-bad, var(--theme-error-600));
+    color: var(--widgets-bad, var(--theme-error-600, var(--color-text-danger)));
     font-size: var(--widgets-text-size, 14px);
   }
   /* bars: what each is of, how much of the most, and the amount */
@@ -276,7 +340,7 @@
     gap: 12px;
     padding: 6px 0;
     font-size: var(--widgets-text-size, 14px);
-    color: var(--widgets-text, var(--theme-text));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     text-decoration: none;
   }
   .widgets-chart li > a:hover .widgets-chart__label {
@@ -289,16 +353,27 @@
     white-space: nowrap;
   }
   .widgets-chart__bar {
+    position: relative;
     height: 6px;
     border-radius: 3px;
-    background: var(--theme-elevation-100);
+    background: var(--theme-elevation-100, var(--color-bg-secondary));
   }
+  /* from nothing, which is at the start unless something goes below it */
   .widgets-chart__bar span {
-    display: block;
-    height: 100%;
+    position: absolute;
+    inset-block: 0;
     min-width: 0;
     border-radius: 3px;
-    background: var(--widgets-accent, var(--theme-success-500));
+    background: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
+  }
+  .widgets-chart[data-signed] .widgets-chart__bar:before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset-block: -2px;
+    inset-inline-start: calc(var(--widgets-zero) * 100%);
+    width: 1px;
+    background: var(--theme-elevation-400, var(--color-icon-tertiary));
   }
   /* columns: side by side, as tall as each is of the most */
   .widgets-columns {
@@ -316,30 +391,46 @@
   }
   .widgets-columns li > a,
   .widgets-columns li > div {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 6px;
     height: 100%;
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
     text-decoration: none;
   }
-  .widgets-columns li > a:hover .widgets-columns__bar span {
+  .widgets-columns li:hover .widgets-columns__bar span,
+  .widgets-columns li:focus-within .widgets-columns__bar span {
     opacity: 0.75;
   }
   .widgets-columns__bar {
-    display: flex;
+    position: relative;
     flex: 1;
-    align-items: flex-end;
     align-self: stretch;
-    border-block-end: 1px solid var(--theme-elevation-100);
+    border-block-end: 1px solid var(--theme-elevation-100, var(--color-bg-secondary));
   }
+  /* from nothing, which is at the foot unless something goes below it */
   .widgets-columns__bar span {
-    display: block;
-    width: 100%;
+    position: absolute;
+    inset-inline: 0;
     border-start-start-radius: 3px;
     border-start-end-radius: 3px;
-    background: var(--widgets-accent, var(--theme-success-500));
+    background: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
+  }
+  .widgets-columns__bar span[data-below] {
+    border-radius: 0 0 3px 3px;
+  }
+  /* what goes below nothing hangs from a line where nothing is, in place of the foot */
+  .widgets-columns[data-signed] .widgets-columns__bar {
+    border-block-end-color: transparent;
+  }
+  .widgets-columns[data-signed] .widgets-columns__bar:before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: calc(var(--widgets-zero) * 100%);
+    border-block-start: 1px solid var(--theme-elevation-300, var(--color-border-strong));
   }
   /* one of many is wider than its column: it runs on under the ones after it that are not named */
   .widgets-columns__label {
@@ -373,21 +464,42 @@
   }
   .widgets-line__stroke {
     fill: none;
-    stroke: var(--widgets-accent, var(--theme-success-500));
+    stroke: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
     stroke-width: 2;
     stroke-linejoin: round;
     stroke-linecap: round;
     vector-effect: non-scaling-stroke;
   }
   .widgets-line__area {
-    fill: var(--widgets-accent, var(--theme-success-500));
+    fill: var(--widgets-accent, var(--theme-success-500, var(--color-icon-success)));
     opacity: 0.12;
   }
-  /* seen only when it is focused: the line looks the same with or without them */
+  .widgets-line__zero {
+    stroke: var(--theme-elevation-300, var(--color-border-strong));
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+  /* the room of each point, where its tip opens: seen only when it is focused; the line looks the same without them */
   .widgets-line__point {
     position: absolute;
     top: 0;
     bottom: 0;
+  }
+  /* where each line is at the point under the pointer */
+  .widgets-line__dot {
+    display: none;
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--widgets-series, var(--widgets-accent, var(--theme-success-500, var(--color-icon-success))));
+    box-shadow: 0 0 0 2px var(--widgets-bg, var(--theme-bg, var(--color-bg)));
+    transform: translate(-50%, 50%);
+    pointer-events: none;
+  }
+  .widgets-line__point:hover .widgets-line__dot,
+  .widgets-line__point:focus-visible .widgets-line__dot {
+    display: block;
   }
   .widgets-line__point:focus-visible {
     outline: var(--accessibility-outline);
@@ -397,13 +509,13 @@
     display: flex;
     justify-content: space-between;
     margin-block-start: 6px;
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
     font-size: 11px;
   }
   .widgets-chart__value {
     min-width: 3ch;
     text-align: end;
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -416,17 +528,17 @@
   }
   .widgets-quick__item {
     padding: 8px 14px;
-    background: var(--theme-elevation-50);
-    border: 1px solid var(--widgets-border, var(--theme-border-color));
+    background: var(--theme-elevation-50, var(--color-bg-hover));
+    border: 1px solid var(--widgets-border, var(--theme-border-color, var(--color-border)));
     border-radius: 999px;
-    color: var(--widgets-text, var(--theme-text));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     font: inherit;
     font-size: var(--widgets-text-size, 14px);
     text-decoration: none;
     cursor: pointer;
   }
   .widgets-quick__item:hover, .widgets-quick__item:focus-visible {
-    background: var(--theme-elevation-100);
+    background: var(--theme-elevation-100, var(--color-bg-secondary));
   }
   .widgets-note p {
     margin: 0;
@@ -439,28 +551,156 @@
     font-size: var(--widgets-text-size, 14px);
   }
   /* several at once: each in a colour of its own, named under the head with what it comes to */
+  /* the plugin's own, where a project gives none: chosen for the light theme and for the dark one each */
+  .widgets-tile {
+    --widgets-palette-3: #7a3fd0;
+    --widgets-palette-4: #52915f;
+    --widgets-palette-5: #8c186a;
+    --widgets-palette-6: #766200;
+    --widgets-palette-7: #3647a4;
+    --widgets-palette-8: #b96bf0;
+  }
+  html[data-theme=dark] .widgets-tile {
+    --widgets-palette-3: #8b56f9;
+    --widgets-palette-4: #71ab88;
+    --widgets-palette-5: #a73c7a;
+    --widgets-palette-6: #ba9f17;
+    --widgets-palette-7: #5657bc;
+    --widgets-palette-8: #d0a4fb;
+  }
   .widgets-tile [data-series] {
-    --widgets-series: var(--widgets-series-1, var(--widgets-accent, var(--theme-success-500)));
+    --widgets-series: var(--widgets-series-1, var(--widgets-accent, var(--theme-success-500, var(--color-icon-success))));
   }
   .widgets-tile [data-series='2'] {
-    --widgets-series: var(--widgets-series-2, var(--theme-warning-500));
+    --widgets-series: var(--widgets-series-2, var(--theme-warning-500, var(--color-icon-warning)));
   }
   .widgets-tile [data-series='3'] {
-    --widgets-series: var(--widgets-series-3, var(--theme-elevation-800));
+    --widgets-series: var(--widgets-series-3, var(--widgets-palette-3));
   }
   .widgets-tile [data-series='4'] {
-    --widgets-series: var(--widgets-series-4, var(--theme-error-500));
+    --widgets-series: var(--widgets-series-4, var(--widgets-palette-4));
   }
   .widgets-tile [data-series='5'] {
-    --widgets-series: var(--widgets-series-5, var(--theme-success-300));
+    --widgets-series: var(--widgets-series-5, var(--widgets-palette-5));
   }
   .widgets-tile [data-series='6'] {
-    --widgets-series: var(--widgets-series-6, var(--theme-elevation-400));
+    --widgets-series: var(--widgets-series-6, var(--widgets-palette-6));
+  }
+  .widgets-tile [data-series='7'] {
+    --widgets-series: var(--widgets-series-7, var(--widgets-palette-7));
+  }
+  .widgets-tile [data-series='8'] {
+    --widgets-series: var(--widgets-series-8, var(--widgets-palette-8));
   }
   .widgets-chart__bar span[data-series],
   .widgets-columns__bar span[data-series],
-  .widgets-legend__mark {
+  .widgets-legend__mark,
+  .widgets-tip__mark {
     background: var(--widgets-series);
+  }
+  /* what a column or a point comes to, over the top of the plot: as the admin's own tooltips are */
+  .widgets-tip {
+    display: none;
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    left: 50%;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 8px;
+    border-radius: var(--style-radius-s, var(--radius-chip));
+    background: var(--theme-elevation-800, var(--color-text));
+    color: var(--theme-elevation-0, var(--color-bg));
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.3;
+    text-align: start;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .widgets-tip[data-align=start] {
+    left: auto;
+    inset-inline-start: 0;
+    transform: none;
+  }
+  .widgets-tip[data-align=end] {
+    left: auto;
+    inset-inline-end: 0;
+    transform: none;
+  }
+  .widgets-columns li:hover .widgets-tip,
+  .widgets-columns li:focus-within .widgets-tip,
+  .widgets-line__point:hover .widgets-tip,
+  .widgets-line__point:focus-visible .widgets-tip {
+    display: flex;
+  }
+  .widgets-tip__label {
+    font-weight: 600;
+  }
+  .widgets-tip__value {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .widgets-tip__value span:last-child {
+    margin-inline-start: auto;
+    padding-inline-start: 8px;
+  }
+  .widgets-tip__mark {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px var(--theme-elevation-0, var(--color-bg));
+  }
+  /*
+   * How much the top of columns or a line comes to, and where nothing is, beside them: in a gutter as wide as the
+   * longest of them, each at its height. The foot of the gutter is the row of labels under the plot.
+   */
+  .widgets-scale {
+    --widgets-scale-foot: calc(6px + 11px * 1.3);
+    --widgets-scale-head: 7px;
+    position: relative;
+  }
+  .widgets-scale[data-ticks] {
+    padding-block-start: var(--widgets-scale-head);
+    /* a figure is some 0.6 of the size of its type wide: the gutter is that for each letter of the longest */
+    --widgets-scale-gutter: calc(var(--widgets-gutter) * 0.62 * 11px);
+    padding-inline-start: calc(var(--widgets-scale-gutter) + 8px);
+  }
+  .widgets-scale > :not(.widgets-scale__tick) {
+    position: relative;
+  }
+  .widgets-scale__tick {
+    position: absolute;
+    inset-inline: 0;
+    bottom: calc(var(--widgets-scale-foot) + (100% - var(--widgets-scale-foot) - var(--widgets-scale-head)) * var(--widgets-at));
+    display: flex;
+    align-items: center;
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
+    font-size: 11px;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    transform: translateY(50%);
+    pointer-events: none;
+  }
+  .widgets-scale__tick span {
+    flex: none;
+    width: var(--widgets-scale-gutter);
+    text-align: end;
+  }
+  /* the top, as a faint line across */
+  .widgets-scale__tick[data-tick=top]:after {
+    content: "";
+    flex: 1;
+    margin-inline-start: 8px;
+    border-block-start: 1px dashed var(--theme-elevation-150, var(--color-bg-tertiary));
+  }
+  .widgets-scale .widgets-line__labels {
+    line-height: 1.3;
   }
   .widgets-line__stroke[data-series] {
     stroke: var(--widgets-series);
@@ -473,7 +713,7 @@
     margin-block-end: 8px;
     padding: 0;
     list-style: none;
-    color: var(--widgets-muted, var(--theme-elevation-650));
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
     font-size: var(--widgets-note-size, 13px);
   }
   .widgets-legend li {
@@ -487,16 +727,20 @@
     border-radius: 2px;
   }
   .widgets-legend__total {
-    color: var(--widgets-text, var(--theme-text));
+    color: var(--widgets-text, var(--theme-text, var(--color-text)));
     font-variant-numeric: tabular-nums;
+  }
+  /* where each is drawn to its own scale, so their heights are not to be set against one another */
+  .widgets-legend__note {
+    margin-block: -4px 4px;
+    color: var(--widgets-muted, var(--theme-elevation-650, var(--color-text-secondary)));
+    font-size: 11px;
   }
   /* parts of one bar follow one another in it; several of their own lie one under the other */
   .widgets-chart[data-many='stacked'] .widgets-chart__bar {
-    display: flex;
     overflow: hidden;
   }
   .widgets-chart[data-many='stacked'] .widgets-chart__bar span {
-    flex: none;
     border-radius: 0;
   }
   .widgets-chart__bars {
@@ -506,21 +750,11 @@
   .widgets-chart[data-many='grouped'] .widgets-chart__bar {
     height: 4px;
   }
-  .widgets-columns[data-many='grouped'] .widgets-columns__bar {
-    gap: 1px;
-  }
+  /* several side by side share a column a pixel apart, where they are put */
   .widgets-columns[data-many='grouped'] .widgets-columns__bar span {
-    flex: 1 1 0;
-    width: auto;
-    min-width: 0;
-  }
-  .widgets-columns[data-many='stacked'] .widgets-columns__bar {
-    flex-direction: column-reverse;
-    align-items: stretch;
-    justify-content: flex-start;
+    inset-inline-end: auto;
   }
   .widgets-columns[data-many='stacked'] .widgets-columns__bar span {
-    flex: none;
     border-radius: 0;
   }
 }

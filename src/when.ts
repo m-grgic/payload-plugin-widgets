@@ -15,6 +15,15 @@ export type Moment = Anchor | `${Anchor}${'+' | '-'}${number}${'d' | 'w' | 'm' |
 
 const MOMENT = /^(now|today|tomorrow|yesterday|startOfWeek|startOfMonth|startOfYear)(?:([+-]\d+)([dwmy]))?$/
 
+/** The moments there are by name, without counting from them. */
+export const ANCHORS: readonly Anchor[] = ['now', 'today', 'tomorrow', 'yesterday', 'startOfWeek', 'startOfMonth', 'startOfYear']
+
+/** Whether something is a moment by name: `today`, `startOfMonth-1m`. */
+export const isMoment = (text: unknown): text is Moment => typeof text === 'string' && MOMENT.test(text)
+
+/** Whether something is a date or an instant as Payload takes one: `2026-03-01`, `2026-03-01T08:00:00Z`. */
+export const isDateText = (text: unknown) => typeof text === 'string' && /^\d{4}-\d{2}-\d{2}(?:$|[T ])/.test(text) && !Number.isNaN(Date.parse(text))
+
 /** A day moved by whole months, kept within the month it lands in: a month after 31 January is the end of February. */
 export const months = (date: string, count: number) => {
   const [year, month, day] = date.split('-').map(Number)

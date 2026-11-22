@@ -1,8 +1,9 @@
-import type { CollectionConfig, CollectionSlug, Config, Payload, PayloadRequest, Plugin, Where, Widget, WidgetInstance } from 'payload'
-import { dateProblems, elevatedProblems, figureProblems, formulaProblems, inWords, measureProblems, nameProblems, noSource, seriesProblems, viewProblems, whereProblems, type Problem } from './check'
+import type { CollectionConfig, CollectionSlug, Config, PayloadRequest, Plugin, Widget, WidgetInstance } from 'payload'
+import { elevatedProblems, fieldProblems, fieldsInConfig, figureProblems, inWords, Misconfigured, misspelt, nameProblems, noSource, seriesProblems, slugProblems, stamped, viewProblems, type Problem } from './check'
 import { component, said, setUp, sized } from './fields'
 import { forgotten, MANY } from './tally'
-import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } from './options'
+import { offered } from './users'
+import { KEY, settled, sourceCalled, startsWith, type Options, type Settings, type Sources } from './options'
 
 // Dashboard widgets that read from the collections. Without anything declared, every collection is a source as its
 // fields describe it: how many, a sum for each number, a group for each select and relationship, the latest. Anybody
@@ -51,15 +52,21 @@ import { KEY, settled, sourceCalled, startsWith, type Options, type Settings } f
 // The tiles bring their own styles and follow the admin's theme; ./widgets.css lists the variables, the classes
 // and the attributes a project restyles them by.
 
+// What a project uses, as the README tells of it; what only a source written by hand needs is in ./exports/advanced.
 export { chart, figure, list, widget } from './options'
-export type { Action, Home, Options, Widget as ReadyWidget } from './options'
+export type { Action, ChartOptions, FigureOptions, Home, ListOptions, Options, Sources, Widget as WidgetDefinition } from './options'
 export type { CollectionHint, FieldHint } from './discover'
 export type { Moment } from './when'
 export { PLURALS, STRINGS, type Dictionary, type Plurals, type WidgetString } from './strings'
-export type { Problem } from './check'
-export { Misconfigured, readChart, readFigure, readList, Unavailable } from './data'
-export type { Bar, ChartReading } from './read'
-export * from './types'
+export type { Problem, ProblemCode } from './check'
+export { Misconfigured, readChart, readFigure, readList, TimedOut, Unavailable } from './data'
+export type { Bar, ChartReading, Series } from './read'
+export { anyOf, count, PERIODS, raw, reckoned, records, rows, selected, source, sum, VIEWS } from './types'
+export type {
+  Access, Amount, AnySource, Calc, Compared, Condition, Context, Doc, FieldWhere, FigureReading, Fields, Filter, Format, Formula, From, Kind,
+  Label, List, ListReading, Measure, MeasureSpec, More, Narrowing, Numbers, Paths, Period, Point, RawWhere, ReadChartOptions, ReadFigureOptions,
+  ReadListOptions, Reading, Reckoned, Row, Selected, Selection, Sort, Source, Test, Tone, Vars, View, Viewer, WhereOf,
+} from './types'
 
 /**
  * The dashboard somebody starts with, and what "Reset layout" goes back to: the ready-made widgets that are for
@@ -79,54 +86,55 @@ const layoutFor = async (settings: Settings, req: PayloadRequest): Promise<Widge
   ] as WidgetInstance[]
 }
 
-const listed = (found: [string, Problem][]) => found.map(([slug, problem]) => `  - "${slug}": ${inWords(problem)}`).join('\n')
+const listed = (found: [string, Problem][]) => found.map(([slug, problem]) => `  - "${slug}"${problem.path ? ` at ${problem.path}` : ''}: ${inWords(problem)}`).join('\n')
+
+/** Problems as one error, each told where in the options it is: `widgets.overdue.where.dueDate.less_than`, `sources.orders.groups.custmer`. */
+const thrown = (found: [string, Problem][], what: string) => new Misconfigured(
+  found.map(([where, problem]) => ({ ...problem, path: [where, problem.path].filter(Boolean).join('.') })),
+  `widgetsPlugin: ${what}\n${listed(unprefixed(found))}`,
+)
+
+/** What is said of widgets and of sources, by what is wrong with them: set up with what is not there, or called what is taken. */
+const told = (found: [string, Problem][]) => {
+  const slugs = found.filter(([, problem]) => problem.code === 'duplicate-slug' || problem.code === 'reserved-slug').length
+  const widgets = found.filter(([where]) => where.startsWith('widgets.')).length - slugs
+  const sources = found.length - widgets - slugs
+  const unset = [
+    ...(widgets ? [widgets === 1 ? 'a widget is' : 'some widgets are'] : []),
+    ...(sources ? [sources === 1 ? 'a source is' : 'some sources are'] : []),
+  ].join(' and ')
+  return [
+    ...(unset ? [`${unset} set up with what is not there`] : []),
+    ...(slugs ? [slugs === 1 ? 'a widget is called by a slug that is taken' : 'some widgets are called by slugs that are taken'] : []),
+  ].join(', and ')
+}
+
+const unprefixed = (found: [string, Problem][]): [string, Problem][] => found.map(([where, problem]) => [where.replace(/^(widgets|sources)\./, ''), problem])
 
 /** The ready-made widgets that pick a source, or a name from one, that is not there: found as the config is built. */
 const misnamed = (settings: Settings): [string, Problem][] => settings.widgets.flatMap((widget): [string, Problem][] => {
   if (widget.kind === 'own') return []
   const source = typeof widget.source === 'string' ? sourceCalled(settings.sources, widget.source) : widget.source
-  if (!source) return [[widget.slug, noSource(String(widget.source), settings.sources)]]
+  if (!source) return [[`widgets.${widget.slug}`, noSource(String(widget.source), settings.sources)]]
   return [
     ...elevatedProblems(widget.kind, widget, source),
     ...nameProblems(source, widget.show, widget.kind), ...viewProblems(widget.kind, widget.show.as, settings.views),
     ...(widget.kind === 'figure' ? figureProblems(widget.show as never) : []),
     ...(widget.kind === 'chart' ? seriesProblems(widget.show) : []),
-  ].map(problem => [widget.slug, problem])
-})
-
-/** What only shows once Payload has settled the collections: a filter on a field one does not have, a date that is none. */
-const misfiltered = (settings: Settings, payload: Payload): [string, Problem][] => settings.widgets.flatMap((widget): [string, Problem][] => {
-  if (widget.kind === 'own') return []
-  const source = typeof widget.source === 'string' ? sourceCalled(settings.sources, widget.source) : widget.source
-  const fields = source && payload.collections[source.slug as CollectionSlug]?.config.flattenedFields
-  if (!source || !fields) return []
-  return [
-    ...whereProblems(source.slug, fields, widget.show.where), ...dateProblems(source.slug, fields, widget.show.date),
-    ...(widget.kind === 'list' ? [] : [widget.show.measure].flat().flatMap(measure => measureProblems(source, fields, measure))),
-  ].map(problem => [widget.slug, problem])
-})
-
-/** The same of the filters a source declares as they are, without a function. */
-const misdeclared = (settings: Settings, payload: Payload): [string, Problem][] => Object.entries(settings.sources).flatMap(([name, source]) => {
-  const fields = payload.collections[source.slug as CollectionSlug]?.config.flattenedFields
-  if (!fields) return []
-  return [
-    ...Object.entries(source.filters).flatMap(([filter, { where }]) =>
-      (typeof where === 'function' ? [] : whereProblems(source.slug, fields, where as Where)).map((problem): [string, Problem] => [`${name}.${filter}`, problem])),
-    // and of what its measures are worked out of
-    ...Object.entries(source.measures).flatMap(([measure, { amount }]) =>
-      (amount?.plain?.formula === undefined ? [] : formulaProblems(source.slug, fields, amount.plain.formula)).map((problem): [string, Problem] => [`${name}.${measure}`, problem])),
-  ]
+  ].map(problem => [`widgets.${widget.slug}`, problem])
 })
 
 /** After the plugins that leave their order open, so the collections they add are sources as well. */
 const ORDER = 100
 
-export const widgetsPlugin = (options: Options = {}): Plugin => Object.assign((config: Config): Config => {
+export const widgetsPlugin = <const G extends Sources = Sources>(options: Options<G> = {}): Plugin => Object.assign((config: Config): Config => {
   const settings = settled(options, config)
+  const strict = options.strict !== false
   const dashboard = config.admin?.dashboard
-  const wrong = misnamed(settings)
-  if (wrong.length) throw new Error(`widgetsPlugin: ${wrong.length === 1 ? 'a widget is' : 'some widgets are'} set up with what is not there\n${listed(wrong)}`)
+  const taken = Object.fromEntries((dashboard?.widgets ?? []).map(widget => [widget.slug, 'the dashboard']))
+  const slugs = slugProblems(settings.widgets.map(widget => widget.slug), taken).map(([slug, problem]): [string, Problem] => [`widgets.${slug}`, problem])
+  const wrong = [...slugs, ...misnamed(settings), ...(strict ? fieldProblems(settings, fieldsInConfig(config)) : [])]
+  if (wrong.length) throw thrown(wrong, told(wrong))
   const seen = new Set((config.collections ?? []).map(collection => collection.slug as string))
 
   const ready: Widget[] = settings.widgets.map(widget => ({
@@ -159,15 +167,20 @@ export const widgetsPlugin = (options: Options = {}): Plugin => Object.assign((c
     custom: { ...config.custom, [KEY]: settings },
     onInit: async payload => {
       await config.onInit?.(payload)
-      const off = misfiltered(settings, payload)
-      if (off.length) payload.logger.error(`widgetsPlugin: ${off.length === 1 ? 'a widget is' : 'some widgets are'} set up with what is not there\n${listed(off)}`)
-      const filters = misdeclared(settings, payload)
-      if (filters.length) payload.logger.error(`widgetsPlugin: ${filters.length === 1 ? 'a filter of a source is' : 'some filters of the sources are'} on what is not there\n${listed(filters)}`)
+      // now with every field Payload has added: what could not be known as the config was built
+      const off = fieldProblems(settings, slug => {
+        const collection = payload.collections[slug as CollectionSlug]?.config
+        return collection?.flattenedFields && stamped(collection, collection.flattenedFields)
+      })
+      if (off.length && strict) throw thrown(off, told(off))
+      if (off.length) payload.logger.error(`widgetsPlugin: ${told(off)}\n${listed(unprefixed(off))}`)
+      const misspelled = misspelt(options.i18n?.translations ?? {})
+      if (misspelled.length) payload.logger.warn(`widgetsPlugin: some translations are of what the widgets do not say\n${misspelled.map(([language, key, meant]) => `  - ${language} "${key}": did you mean "${meant}"?`).join('\n')}`)
       // Payload's own come after every plugin; anything else was added by one that ran later still
       const late = options.discover === false ? [] : Object.keys(payload.collections).filter(slug => !seen.has(slug) && !slug.startsWith('payload-'))
       // said once, so that a figure that stops at MANY records is not a surprise
       const adapter = (payload.db as { name?: string } | undefined)?.name
-      if (adapter !== 'postgres') payload.logger.info(`widgetsPlugin: the ${adapter ?? 'unknown'} database adapter does not add up for the widgets, so sums, averages and charts are worked out from the records, at most ${MANY} of them`)
+      if (adapter !== 'postgres') payload.logger.info(`widgetsPlugin: the ${adapter ?? 'unknown'} database adapter does not add up for the widgets, so sums, averages and charts are worked out from the records, at most ${settings.limits.records ?? MANY} of them`)
       if (late.length) payload.logger.warn(`widgetsPlugin: ${late.join(', ')} ${late.length === 1 ? 'was' : 'were'} added to the config after the widgets were set up, and ${late.length === 1 ? 'is no source' : 'are no sources'}: give the plugin that adds ${late.length === 1 ? 'it' : 'them'} an order below ${ORDER}`)
     },
     admin: {
@@ -175,7 +188,8 @@ export const widgetsPlugin = (options: Options = {}): Plugin => Object.assign((c
       dependencies: { ...config.admin?.dependencies, ...under, ...views },
       dashboard: {
         ...dashboard,
-        widgets: [...(dashboard?.widgets ?? []), ...ready, ...setUp(settings)],
+        // those set up in the drawer, as `userWidgets` has them
+        widgets: [...(dashboard?.widgets ?? []), ...ready, ...offered(settings, setUp)],
         defaultLayout: dashboard?.defaultLayout ?? (({ req }) => layoutFor(settings, req)),
       },
     },

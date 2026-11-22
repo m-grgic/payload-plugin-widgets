@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { Config } from 'payload'
+import type { Config, Field } from 'payload'
 import { chart, figure, list, source, widgetsPlugin } from '../src/index'
 
 const config = () => ({
@@ -41,12 +41,13 @@ test('a view of the project is told to the import map, and offered in the drawer
   const views = { donut: { kind: 'chart' as const, label: 'A donut', Component: 'src/Donut.tsx#Donut' } }
   const built = await widgetsPlugin({ views, widgets: [chart('by-status', 'posts', { label: 'By status', as: 'donut' })] })(config())
   assert.deepEqual(built.admin?.dependencies?.['widgets-view-donut'], { path: 'src/Donut.tsx#Donut', type: 'component' })
-  const drawn = dashboard(built).widgets.find(widget => widget.slug === 'chart')?.fields?.find(field => field.name === 'as') as unknown as { options: { value: string }[] }
+  // the settings are in groups without a name, which keep what is stored flat
+  const drawn = dashboard(built).widgets.find(widget => widget.slug === 'chart')?.fields?.flatMap((field): Field[] => ('fields' in field ? field.fields as Field[] : [field as Field])).find(field => 'name' in field && field.name === 'as') as unknown as { options: { value: string }[] }
   assert.deepEqual(drawn.options.map(option => option.value), ['bars', 'columns', 'line', 'donut'])
 })
 
 test('a widget set up with what is not there stops the config from being built, and says what was meant', () => {
-  const build = (widget: Parameters<typeof figure>[2] & { as?: string }, of = 'posts') => () => widgetsPlugin({ widgets: [figure('wrong', of, widget as never)] })(config())
+  const build = (widget: Record<string, unknown>, of = 'posts') => () => widgetsPlugin({ widgets: [figure('wrong', of, widget as never)] })(config())
   assert.throws(build({ label: 'x' }, 'post'), /"wrong".*Did you mean "posts"\?/s)
   assert.throws(build({ label: 'x', as: 'progres' }), /cannot be drawn as "progres".*Did you mean "progress"\?/s)
   assert.throws(build({ label: 'x', as: 'progress' }), /Progress is towards a goal/)
@@ -55,7 +56,7 @@ test('a widget set up with what is not there stops the config from being built, 
 })
 
 test('a declared source checks the names a widget picks from it', () => {
-  const orders = source('orders' as never, {
+  const orders = source('orders', {
     label: 'Orders',
     filters: { unpaid: { where: { paid: { equals: false } } } },
     measures: { total: { sum: 'total', format: 'money' } },

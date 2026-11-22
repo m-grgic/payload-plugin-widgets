@@ -1,6 +1,8 @@
 import type { Access, CollectionSlug, DataFromCollectionSlug, Payload, PayloadRequest, Where, WhereField } from 'payload'
+import type { readFigure } from './data'
 import { at, isFormula, numberOf, pathsIn, type Formula } from './formula'
-import { combined, counted, countOf, currencyOf, fetched, made, MANY, tallied } from './tally'
+import { combined, counted, countOf, currencyOf, fetched, made, MANY, recordsOf, tallied } from './tally'
+import type { Moment } from './when'
 
 export { combined, counted, currencyOf, fetched, MANY }
 export type { Compared, Formula, Test } from './formula'
@@ -108,6 +110,8 @@ export interface Context {
   sums?: 'database' | 'records'
   /** For how many seconds what was read is kept (see `cache` in the options). */
   cache?: number
+  /** How much a widget may ask of the database (see `limits` in the options): each has its default where it is left out. */
+  limits?: { records?: number; groups?: number; timeoutMs?: number }
 }
 
 /**
@@ -137,7 +141,8 @@ export class Selection {
   }
 }
 
-export const any = (...alternatives: Where[][]) => new Selection(alternatives)
+/** Records that meet any one of several sets of conditions, each set all holding: `anyOf([mine], [shared, open])`. */
+export const anyOf = (...alternatives: Where[][]) => new Selection(alternatives)
 
 /** A field's or a collection's name as words: `estimatedTime` and `time-tracking` as "Estimated time" and "Time tracking". */
 export const worded = (name: string) => {
@@ -201,7 +206,7 @@ export type Fields<S extends CollectionSlug> = Paths<Doc<S>, unknown>
  * In place of a field it takes a formula over several (see `Formula`), which the database can work out as well.
  * How it is written is the field's own (see `FieldHint`) or the measure's where nothing is said here.
  */
-export type Reckoned<N extends string = string> = { [C in Calc]: { [K in C]: N | Exclude<Formula<N>, string> } & { [K in Exclude<Calc, C>]?: never } }[Calc] & {
+export type Reckoned<N extends string = string, T extends string = string> = { [C in Calc]: { [K in C]: N | Exclude<Formula<N, T>, string> } & { [K in Exclude<Calc, C>]?: never } }[Calc] & {
   format?: Format
   /** Where it is money: the field that holds the currency of a record. */
   currency?: string
@@ -239,14 +244,74 @@ export interface ListReading {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any
 
-/**
- * One condition of a filter: on a field of the collection, which the editor offers, or on a path into what a field
- * points at (`task.project`), which it cannot know.
- */
-export type Condition<S extends CollectionSlug = Loose> = { [P in keyof Doc<S> & string]?: WhereField } | Where | Record<string, WhereField | undefined>
+type IsAny<T> = 0 extends 1 & T ? true : false
 
-/** A filter as Payload takes them anywhere, with the collection's fields offered by the editor at every level of `and` and `or`. */
-export type Narrowing<S extends CollectionSlug = Loose> = ({ [P in keyof Doc<S> & string]?: WhereField } & { and?: Narrowing<S>[]; or?: Narrowing<S>[] }) | Where
+// a type-only mark: nothing of it is there when the config runs
+declare const RAW: unique symbol
+
+/** A filter the types do not follow, taken as it is: made with `raw`. */
+export interface RawWhere { readonly [RAW]: true }
+
+/**
+ * A filter as Payload takes it, passed over by the types: for what they cannot say, a path into what a field points
+ * at (`{ 'customer.country': { equals: 'Croatia' } }`), a filter made elsewhere as a `Where`. It is still checked as
+ * the config is built, against the collection's fields where it names one of them.
+ *
+ *   where: raw({ 'customer.country': { equals: 'Croatia' } })
+ */
+export const raw = (where: Where): RawWhere => where as unknown as RawWhere
+
+/** What a field is compared with: what is pointed at by its id, a field that holds several by any one of them. */
+type One<V> = V extends { id: infer Id } ? Id : V extends object ? unknown : V
+type Same<V> = NonNullable<V> extends readonly (infer Each)[] ? One<Each> : One<NonNullable<V>>
+/** What is more or less than a field: a number than a number, a date than a date or a moment by name (see `Moment`). */
+type Ordered<V> = [V] extends [number] ? number : [V] extends [string] ? Moment | (string & {}) : unknown
+
+/** How a field of the type `V` can be compared, as Payload compares in a filter: a choice of a select only with one of its own. */
+export type FieldWhere<V> = IsAny<V> extends true ? WhereField : {
+  equals?: Same<V> | null
+  not_equals?: Same<V> | null
+  in?: Same<V>[]
+  not_in?: Same<V>[]
+  all?: Same<V>[]
+  exists?: boolean
+  greater_than?: Ordered<Same<V>>
+  greater_than_equal?: Ordered<Same<V>>
+  less_than?: Ordered<Same<V>>
+  less_than_equal?: Ordered<Same<V>>
+  like?: string
+  not_like?: string
+  contains?: Same<V> | string
+  near?: unknown
+  within?: unknown
+  intersects?: unknown
+}
+
+/** Every field of a record with what it holds, by its path: as `Paths`, through groups and the rows of arrays, twice at most. */
+type Entries<D, Prefix extends string = '', Depth extends unknown[] = []> = {
+  [P in keyof D & string]-?:
+    | [`${Prefix}${P}`, D[P]]
+    | (Depth['length'] extends 2 ? never : Holding<NonNullable<D[P]>> extends infer Inner ? ([Inner] extends [never] ? never : Entries<Inner, `${Prefix}${P}.`, [...Depth, 0]>) : never)
+}[keyof D & string]
+
+/** A filter of records of the type `D`: each field by its path, compared as it can be, with `and` and `or` of the same. */
+export type WhereOf<D> =
+  | ({ [E in Entries<D> as E[0]]?: FieldWhere<E[1]> } & { and?: WhereOf<D>[]; or?: WhereOf<D>[] })
+  | RawWhere
+
+/**
+ * A filter as Payload takes them anywhere, of the fields the collection has: a field that is not there, a way to
+ * compare it there is none of, or a choice its select does not offer does not compile. A date can be compared with a
+ * moment by name (`{ dueDate: { less_than: 'today' } }`). What the types cannot say goes through `raw`. Without the
+ * types Payload generates, any filter.
+ */
+export type Narrowing<S extends CollectionSlug = Loose> =
+  IsAny<S> extends true ? Where | RawWhere
+    : string extends keyof Doc<S> ? Where | RawWhere
+      : WhereOf<Doc<S>>
+
+/** One of the conditions that all hold in a filter worked out by a function: a filter in itself. */
+export type Condition<S extends CollectionSlug = Loose> = Narrowing<S>
 
 /** What records are sorted by: a field, with `-` before it for the other way round. */
 export type Sort<S extends CollectionSlug = Loose> = (keyof Doc<S> & string) | `-${keyof Doc<S> & string}` | (string & {})
@@ -256,7 +321,7 @@ export interface Filter<S extends CollectionSlug = Loose> {
   /**
    * Which records, as Payload filters them anywhere, moments by name included: `{ dueDate: { less_than: 'today' } }`.
    * Or worked out for whoever is looking: a function that gives the same, conditions that all hold, or a selection
-   * where there are alternatives (`any([…], […])`).
+   * where there are alternatives (`anyOf([…], […])`).
    */
   where: Narrowing<S> | ((context: Context) => Selection | Condition<S>[] | Narrowing<S>)
   /** What is worth saying under the number of them. */
@@ -286,7 +351,7 @@ export interface Amount<D> {
 }
 
 /** A measure as a source can declare it in place: `{ avg: 'total', format: 'money', currency: 'currency' }`. */
-export type MeasureSpec<S extends CollectionSlug = Loose, F extends string = string> = Reckoned<Numbers<S> | (string & {})> & {
+export type MeasureSpec<S extends CollectionSlug = Loose, F extends string = string> = Reckoned<Numbers<S>, Fields<S>> & {
   /** Named after the field and how it is worked out where it is left out. */
   label?: Label
   filter?: F
@@ -379,6 +444,8 @@ export const source = <
   discover?: boolean
   draft?: boolean
   date?: Paths<Doc<S>, string>
+  /** The other dates a widget can go by instead, each with what to call it: `{ dueDate: 'Due' }`. */
+  dates?: Partial<Record<Paths<Doc<S>, string>, Label>>
   /** Each with what it is called; named after its key where that is left out. */
   filters?: Record<F, Omit<Filter<S>, 'label'> & { label?: Label }>
   /**
@@ -436,7 +503,7 @@ export const reckoned = <S extends CollectionSlug = Loose>(label: Label, amount:
       // of money, what is in the currency the widgets were given
       amount: totals.get(amount.format === 'money' ? context.currency.toUpperCase() : '') ?? 0,
       // more than can be read at once: said, so the figure is not taken for all of them
-      note: cut ? context.t('Only the first {count} are counted', { count: context.number(MANY) })
+      note: cut ? context.t('Only the first {count} are counted', { count: context.number(recordsOf(context)) })
         : found ? context.plural(found, amount.unit?.[0] ?? 'record', amount.unit?.[1] ?? 'records') : context.t('Nothing recorded yet'),
       ...(cut ? { tone: 'warn' as const } : {}),
     }
@@ -490,7 +557,7 @@ export const sum = <S extends CollectionSlug>(label: Label, field: Numbers<S>, f
    * Where a record does not simply count as its field, what it counts as. A formula (see `Formula`) the database
    * can work out as well; a function it cannot, so the records are read, with what else it reads named in `select`.
    */
-  of?: ((doc: Doc<S>) => number) | Exclude<Formula<Numbers<S>>, string>
+  of?: ((doc: Doc<S>) => number) | Exclude<Formula<Numbers<S>, Fields<S>>, string>
   select?: (keyof Doc<S> & string)[]
 } = {}): Measure<S, never> => {
   type D = Doc<S>
@@ -538,3 +605,8 @@ export const rows = <S extends CollectionSlug, const K extends keyof Doc<S> & st
     }
   },
 })
+
+// what `readFigure`, `readList` and `readChart` take besides the request and the source
+export type { ReadChartOptions, ReadFigureOptions, ReadListOptions } from './data'
+/** What `readFigure` gives: the figure, with what it was asked for besides. */
+export type FigureReading = Awaited<ReturnType<typeof readFigure>>

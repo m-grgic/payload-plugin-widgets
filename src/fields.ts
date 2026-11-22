@@ -1,5 +1,6 @@
 import { validations, type Field, type NumberFieldSingleValidation, type Option, type PayloadRequest, type Widget } from 'payload'
 import type { Settings } from './options'
+import { accessArgs } from './versions'
 import { PERIODS, VIEWS, worded, type AnySource, type Kind, type Label, type Measure } from './types'
 
 // The widgets somebody sets up themselves, and the form each is set up with. A choice is kept as `source.name`, so
@@ -20,10 +21,11 @@ type Narrow = { options: Option[]; siblingData: Record<string, unknown>; req: Pa
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = Record<string, any>
 
-/** Fields written in English, said in the admin's languages; a label that already is in several is left as it is. They are flat: the form of a widget cannot draw fields inside a row. */
+/** Fields written in English, said in the admin's languages, those in a group with them; a label that already is in several is left as it is. */
 export const said = (fields: Field[], label: (english: Label) => Label): Field[] => fields.map(original => {
   const field: Loose = { ...original }
   if (typeof field.label === 'string') field.label = label(field.label)
+  if (Array.isArray(field.fields)) field.fields = said(field.fields, label)
   if (typeof field.admin?.description === 'string') field.admin = { ...field.admin, description: label(field.admin.description) }
   if (Array.isArray(field.options)) {
     field.options = field.options.map((option: Loose) => ({ ...option, label: typeof option.label === 'string' ? label(option.label) : option.label }))
@@ -48,7 +50,7 @@ export const setUp = (settings: Settings): Widget[] => {
   const forViewer = ({ options, req }: Narrow) => options.filter(option => {
     if (typeof option === 'string' || !sources[option.value]) return false
     try {
-      return !!(sources[option.value].access?.({ req }) ?? true)
+      return !!(sources[option.value].access?.(accessArgs(req, sources[option.value].slug)) ?? true)
     } catch {
       return false
     }
@@ -121,69 +123,92 @@ export const setUp = (settings: Settings): Widget[] => {
     return options.length > 1 ? [{ name: 'as', type: 'select', label: 'Drawn as', defaultValue: options[0].value, options: options.map(option => ({ ...option, label: label(option.label) })) } as Field] : []
   }
 
+  /**
+   * The settings in three parts, each under a heading: what is counted, when, and how it looks. A group without a
+   * name is only drawn: what is kept is as flat as it was without it, and a condition is handed the same siblings.
+   */
+  const part = (heading: 'What is counted' | 'When' | 'How it looks', fields: Field[]): Field => ({ type: 'group', label: heading, fields })
+
   const widgets: (Widget & { label: string })[] = [
     {
-      slug: 'figure', label: 'A figure', Component: component('FigureWidget'), ...TILE,
+      slug: 'figure', label: 'Figure', Component: component('FigureWidget'), ...TILE,
       fields: [
-        title, from, filter, ...where,
-        {
-          name: 'measure', type: 'select', label: 'What about them',
-          options: choices(source => labels(source.measures)),
-          filterOptions: ofSource as never,
-          admin: { description: 'Leave empty for how many there are.' },
-        },
-        calc, period, ...dates,
-        {
-          name: 'compare', type: 'select', label: 'Compared with', options: [{ label: 'The period before', value: 'previous' }],
-          admin: { condition: (data, sibling) => !!sibling?.period && !['all', 'past', 'upcoming'].includes(String(sibling.period)), description: 'Leave empty for no comparison.' },
-        },
-        // it is needed where it is drawn as progress, and said in the line under it however it is drawn, so it is always offered
-        { name: 'goal', type: 'number', label: 'Goal', min: 0, validate: needsGoal, admin: { description: 'What it is set against. Leave empty for none.' } },
-        ...drawn('figure'),
-        {
-          name: 'note', type: 'text', label: 'Line under it',
-          admin: { description: 'Leave empty for the usual one. It can use {value}, {note}, {previous}, {change}, {goal}, {percent} and {left}.' },
-        },
+        part('What is counted', [
+          from, filter, ...where,
+          {
+            name: 'measure', type: 'select', label: 'What about them',
+            options: choices(source => labels(source.measures)),
+            filterOptions: ofSource as never,
+            admin: { description: 'Leave empty for how many there are.' },
+          },
+          calc,
+        ]),
+        part('When', [
+          period, ...dates,
+          {
+            name: 'compare', type: 'select', label: 'Compared with', options: [{ label: 'The period before', value: 'previous' }],
+            admin: { condition: (data, sibling) => !!sibling?.period && !['all', 'past', 'upcoming'].includes(String(sibling.period)), description: 'Leave empty for no comparison.' },
+          },
+        ]),
+        part('How it looks', [
+          ...drawn('figure'),
+          // it is needed where it is drawn as progress, and said in the line under it however it is drawn, so it is always offered
+          { name: 'goal', type: 'number', label: 'Goal', min: 0, validate: needsGoal, admin: { description: 'What it is set against. Leave empty for none.' } },
+          {
+            name: 'note', type: 'text', label: 'Line under it',
+            admin: { description: 'Leave empty for the usual one. It can use {value}, {note}, {previous}, {change}, {goal}, {percent} and {left}.' },
+          },
+          title,
+        ]),
       ],
     },
     {
-      slug: 'records', label: 'A list', Component: component('RecordsWidget'), ...LIST,
+      slug: 'records', label: 'List', Component: component('RecordsWidget'), ...LIST,
+      // a list is of no time: it has no part for when
       fields: [
-        title, from,
-        {
-          name: 'list', type: 'select', label: 'Which list',
-          options: choices(source => labels(source.lists)),
-          filterOptions: ofSource as never,
-          admin: { condition: has(source => source.lists, 1) },
-        },
-        filter, ...where,
-        { name: 'limit', type: 'number', label: 'How many rows', defaultValue: 6, min: 1, max: 20 },
-        ...drawn('list'),
+        part('What is counted', [
+          from,
+          {
+            name: 'list', type: 'select', label: 'Which list',
+            options: choices(source => labels(source.lists)),
+            filterOptions: ofSource as never,
+            admin: { condition: has(source => source.lists, 1) },
+          },
+          filter, ...where,
+        ]),
+        part('How it looks', [
+          { name: 'limit', type: 'number', label: 'How many rows', defaultValue: 6, min: 1, max: 20 },
+          ...drawn('list'),
+          title,
+        ]),
       ],
     },
     {
-      slug: 'chart', label: 'A chart', Component: component('ChartWidget'), ...LIST,
+      slug: 'chart', label: 'Chart', Component: component('ChartWidget'), ...LIST,
       fields: [
-        title, from, filter, ...where,
-        {
-          name: 'measure', type: 'select', label: 'What is drawn',
-          options: choices(source => labels(source.measures, (measure: { amount?: unknown }) => !!measure.amount)),
-          filterOptions: ofSource as never,
-          admin: { description: 'Leave empty for how many there are.' },
-        },
-        calc,
-        {
-          name: 'by', type: 'select', label: 'Split by', defaultValue: 'time',
-          options: [{ label: 'Over time', value: 'time' }, ...choices(source => (source.groups ?? {}) as Record<string, Label>)],
-          filterOptions: ofSource as never,
-        },
-        {
-          name: 'series', type: 'select', label: 'A series for each',
-          options: choices(source => (source.groups ?? {}) as Record<string, Label>),
-          filterOptions: ofSource as never,
-          admin: { condition: has(source => source.groups, 1), description: 'Leave empty for one.' },
-        },
-        ...drawn('chart'), period, ...dates,
+        part('What is counted', [
+          from, filter, ...where,
+          {
+            name: 'measure', type: 'select', label: 'What is drawn',
+            options: choices(source => labels(source.measures, (measure: { amount?: unknown }) => !!measure.amount)),
+            filterOptions: ofSource as never,
+            admin: { description: 'Leave empty for how many there are.' },
+          },
+          calc,
+          {
+            name: 'by', type: 'select', label: 'Split by', defaultValue: 'time',
+            options: [{ label: 'Over time', value: 'time' }, ...choices(source => (source.groups ?? {}) as Record<string, Label>)],
+            filterOptions: ofSource as never,
+          },
+          {
+            name: 'series', type: 'select', label: 'A series for each',
+            options: choices(source => (source.groups ?? {}) as Record<string, Label>),
+            filterOptions: ofSource as never,
+            admin: { condition: has(source => source.groups, 1), description: 'Leave empty for one.' },
+          },
+        ]),
+        part('When', [period, ...dates]),
+        part('How it looks', [...drawn('chart'), title]),
       ],
     },
   ]

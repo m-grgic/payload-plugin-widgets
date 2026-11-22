@@ -1,5 +1,8 @@
 import { combineQueries, executeAccess, validateQueryPaths, type CollectionSlug, type FlattenedField, type Where } from 'payload'
+import type { Problem } from './check'
 import { at, found, pieces, valuesAt, type Compared, type Formula, type Test } from './formula'
+import { once } from './memo'
+import { accessArgs } from './versions'
 import type { Amount, AnySource, Calc, Context, Selection } from './types'
 
 // Where the numbers come from. A measure that is no more than a field is added up by the database, where that is
@@ -12,11 +15,27 @@ import type { Amount, AnySource, Calc, Context, Selection } from './types'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Loose = any
 
-/** How many records a sum or a chart reads at most, where they are read one by one. */
+/** How many records a sum or a chart reads at most, where they are read one by one, unless `limits.records` says otherwise. */
 export const MANY = 5000
+
+/**
+ * How many of the values of a field a tally tells apart at most, unless `limits.groups` says otherwise: the rest,
+ * those that come to least, are counted together (see `REST`).
+ */
+export const GROUPS = 1000
+
+/** How many records are read at once, as the widgets were told. */
+export const recordsOf = (context: Pick<Context, 'limits'>) => context.limits?.records ?? MANY
+const groupsOf = (context: Pick<Context, 'limits'>) => context.limits?.groups ?? GROUPS
 
 /** What the records under one heading come to: enough to make one number of several headings, whichever way the measure has it. */
 export interface Cell { keys: string[]; currency: string; count: number; sum: number; min: number; max: number }
+
+/**
+ * The heading of everything a tally does not tell apart: the values of a field beyond the most it keeps apart, all
+ * of them as one. No value a record has is this.
+ */
+export const REST = '\u0000rest'
 
 /** What records are told apart by: what they have in a field, or the day or the month a date of theirs falls in. */
 export type Dim = { field: string } | { date: string; daily: boolean }
@@ -24,8 +43,86 @@ export type Dim = { field: string } | { date: string; daily: boolean }
 /** The records of a selection added up, told apart by any of the ways asked for: `over(0)` by the first of them alone, `over()` by none. */
 export interface Tally {
   over: (...dims: number[]) => Cell[]
-  /** There were more records than are read at once: more than MANY, not as many. */
+  /** There were more records than are read at once: more than `limits.records`, not as many. */
   cut: boolean
+}
+
+/**
+ * Thrown where a widget took longer to read than `limits.timeoutMs`: its tile says so to whoever looks, and the others
+ * are drawn as ever. Neither a `Misconfigured` nor an `Unavailable`; `problemsOf` (see ./check) gives its one problem.
+ */
+export class TimedOut extends Error {
+  // told apart by name, as the others are: the config, and with it this class, may be loaded apart from the page that catches it
+  override name = 'TimedOut'
+  readonly timedOut = true
+  readonly problems: Problem[]
+  constructor(readonly ms: number) {
+    const problems = [{ code: 'timed-out' as const, text: 'This took longer to read than the {seconds} s it is given', vars: { seconds: Number((ms / 1000).toFixed(2)) } }]
+    super(`This took longer to read than the ${ms / 1000} s it is given`)
+    this.problems = problems
+  }
+}
+
+/** Whether what went wrong is the database giving up on a statement that ran out of time. */
+const ranOut = (error: unknown) => {
+  for (let at: Loose = error, depth = 0; at && depth < 5; at = at.cause, depth += 1) if (at.code === '57014') return true
+  return false
+}
+
+/**
+ * The values of the first heading, the most first, as a chart ranks them: by what the measure makes of each, in one
+ * currency where one is given, and of two that come to the same the one that is first by name. What a tally does not
+ * tell apart is none of them.
+ */
+export const ranking = (how: Calc | undefined, cells: Cell[], currency?: string) => {
+  const each = new Map<string, Cell[]>()
+  for (const cell of cells) {
+    const [key] = cell.keys
+    if (key === REST) continue
+    const mine = each.get(key) ?? []
+    each.set(key, mine)
+    if (currency === undefined || cell.currency === currency) mine.push(cell)
+  }
+  // what has nothing in that currency comes after all that has, by name
+  const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+  return [...each].map(([key, mine]) => [key, mine.length ? made(how, mine) : undefined] as const)
+    .sort((a, b) => (a[1] === undefined || b[1] === undefined ? (a[1] === undefined ? 1 : 0) - (b[1] === undefined ? 1 : 0) : b[1] - a[1]) || byName(a[0], b[0]))
+    .map(([key, value]) => [key, value ?? 0] as const)
+}
+
+/**
+ * What of a heading a tally tells apart: everything (nothing said), the values that come to most up to so many, or
+ * just these values. Records with nothing in the field are always told apart: they are at most one more.
+ */
+export type Keep = number | string[] | undefined
+
+/**
+ * A tally that tells apart only what `keep` says of each heading: the values that come to most as `ranking` has
+ * them, or those named. The rest are one, under `REST`, and come to what they all do, so that what is left over and
+ * what all of it comes to are as they were.
+ */
+const folded = (tally: Tally, keep: Keep[], how: Calc | undefined, currency?: string): Tally => {
+  const kept = keep.map((most, index) => {
+    if (most === undefined) return undefined
+    // those that come to most of what has something in the field, as the database keeps them; and what has nothing
+    const set = new Set(Array.isArray(most) ? most : ranking(how, tally.over(index), currency).filter(([key]) => key !== '').slice(0, most).map(([key]) => key))
+    set.add('')
+    // nothing to fold where every value is kept
+    return tally.over(index).every(cell => set.has(cell.keys[0])) ? undefined : set
+  })
+  if (kept.every(set => !set)) return tally
+  const done = new Map<string, Cell[]>()
+  return {
+    cut: tally.cut,
+    over: (...which) => {
+      const name = which.join(',')
+      const cells = done.get(name) ?? merged(tally.over(...which).map(cell => ({
+        ...cell, keys: cell.keys.map((key, index) => (kept[which[index]] && !kept[which[index]]?.has(key) ? REST : key)),
+      })))
+      done.set(name, cells)
+      return cells
+    },
+  }
 }
 
 /** What adding fractions up leaves behind is taken off: 2445.6299999999997 is 2445.63. */
@@ -76,12 +173,15 @@ const kept = (): Map<string, { until: number; value: Promise<unknown> }> => ((gl
 const MOST = 500
 
 const remembered = <T>(context: Context, from: AnySource, what: unknown[], read: () => Promise<T>): Promise<T> => {
-  if (!context.cache) return read()
-  const store = kept()
   const { user } = context.as as { user?: { collection?: string; id?: unknown } }
   // read with the server's access it is the same for everybody; otherwise it is what this one person may see
   const who = context.as.overrideAccess ? '' : `${user?.collection}:${user?.id}`
-  const name = JSON.stringify([from.slug, who, context.req?.locale ?? '', ...what])
+  // and the same whether the database adds up or the records are read, but kept apart, so that each can be checked
+  // against the other
+  const name = JSON.stringify([from.slug, who, context.req?.locale ?? '', context.sums ?? '', ...what])
+  // what one request asks twice, a figure and the chart beside it, is read once for it, kept or not
+  if (!context.cache) return once(context.req, ['tally', name], read)
+  const store = kept()
   const hit = store.get(name)
   if (hit && hit.until > Date.now()) return hit.value as Promise<T>
   const value = read()
@@ -131,16 +231,17 @@ const query = async <D>(context: Context, from: AnySource, selection: Selection,
 }
 
 /**
- * Every record of a selection with only the fields asked for, whatever the source: at most MANY of them. Records are
- * not kept (see `cache`): what is kept is what they come to.
+ * Every record of a selection with only the fields asked for, whatever the source: at most `limits.records` of them
+ * (5000 unless the widgets were told otherwise). Records are not kept (see `cache`): what is kept is what they come to.
  */
 export const fetched = <D>(context: Context, from: AnySource, selection: Selection, select: string[], more: { limit?: number; sort?: string } = {}): Promise<D[]> =>
-  query<D>(context, from, selection, select, more.limit ?? MANY, more.sort)
+  query<D>(context, from, selection, select, more.limit ?? recordsOf(context), more.sort)
 
-/** Every record of a selection up to MANY, and whether there were more: one more is asked for to tell. */
+/** Every record of a selection up to `limits.records`, and whether there were more: one more is asked for to tell. */
 const upTo = async <D>(context: Context, from: AnySource, selection: Selection, select: string[]) => {
-  const docs = await query<D>(context, from, selection, select, MANY + 1)
-  return { docs: docs.slice(0, MANY), cut: docs.length > MANY }
+  const most = recordsOf(context)
+  const docs = await query<D>(context, from, selection, select, most + 1)
+  return { docs: docs.slice(0, most), cut: docs.length > most }
 }
 
 /** How many records there are in a selection, with the access of whoever asks. */
@@ -305,14 +406,15 @@ const tagOf = (name: string): Promise<Loose> => {
 const told = new Set<string>()
 
 /** Added up by the database, or nothing where that would not come to what reading the records does. */
-const inDatabase = async <D>(context: Context, from: AnySource, selection: Selection, amount: Amount<D>, dims: Dim[]): Promise<Cell[] | undefined> => {
+const inDatabase = async <D>(context: Context, from: AnySource, selection: Selection, amount: Amount<D>, dims: Dim[], keep: Keep[] = []): Promise<Cell[] | undefined> => {
   const { payload, req } = context
   const adapter = payload.db as Loose
   const plain = amount.plain
   if (!plain || context.sums === 'records' || from.draft || adapter?.name !== 'postgres' || !adapter.tables || !req) return undefined
   const config = payload.collections[from.slug as CollectionSlug]?.config
-  // what a hook makes of a record on the way out, only reading it tells
-  if (!config || config.hooks?.afterRead?.length) return undefined
+  // what a hook makes of the query or of a record on the way, only reading the records tells: the database is
+  // asked here without them, as a find runs them all
+  if (!config || HOOKED.some(hook => (config.hooks as Loose)?.[hook]?.length)) return undefined
   const table = adapter.tables[adapter.tableNameMap?.get(snake(config.slug))]
   if (!table?.id) return undefined
   const fields = config.flattenedFields
@@ -329,17 +431,12 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
 
   // refused as a read is refused, and narrowed to what whoever asks may read
   let where: Where = selection.where
-  if (!context.as.overrideAccess) where = combineQueries(where, await executeAccess({ req }, config.access.read))
+  // with the slug, as Payload 4 asks it (see `accessArgs`)
+  if (!context.as.overrideAccess) where = combineQueries(where, await executeAccess(accessArgs(req, config.slug), config.access.read))
   if (config.trash) where = combineQueries(where, { deletedAt: { exists: false } })
   await validateQueryPaths({ collectionConfig: config, overrideAccess: context.as.overrideAccess, req, where: selection.where })
 
   const zone = context.zone ?? 'UTC'
-  const picked: Record<string, unknown> = {}
-  dims.forEach((dim, index) => {
-    picked[`key${index}`] = 'field' in dim ? columns[index] : sql`to_char(${columns[index]} at time zone ${zone}, ${dim.daily ? 'YYYY-MM-DD' : 'YYYY-MM'})`
-  })
-  if (currency) picked.currency = currency
-  const headings = Object.keys(picked).length
   // a record without the number counts as nought, as it does when it is read; for an average, a lowest and a
   // highest of a field it is passed over, as it is when it is read
   let value: Loose
@@ -351,38 +448,97 @@ const inDatabase = async <D>(context: Context, from: AnySource, selection: Selec
     if (error instanceof Unplain) return undefined
     throw error
   }
-  Object.assign(picked, { count: passed ? sql`count(${passed})` : sql`count(*)`, sum: sql`sum(${value})`, min: sql`min(${value})`, max: sql`max(${value})` })
+  const count = passed ? sql`count(${passed})` : sql`count(*)`
+  // what a value of a field comes to as a chart ranks it (see `ranking`): in the one currency a chart draws
+  const how = amount.how
+  const rank = how === 'avg' ? sql`(sum(${value})::numeric / nullif(${count}, 0))` : how === 'min' ? sql`min(${value})` : how === 'max' ? sql`max(${value})` : sql`sum(${value})`
+  const main = context.currency.toUpperCase()
+  const drawn = currency ? sql` and upper(coalesce(nullif(${currency}::text, ''), ${main})) = ${main}` : sql``
+  /**
+   * What a field is told apart by: everything, or only the values `keep` says, the rest as `REST`. Those that come to
+   * most are found by the database itself, ranked as a chart ranks them: so it hands back no more than those, and
+   * what the rest come to, however many values the field has.
+   */
+  const keyOf = (index: number, within: Loose) => {
+    const dim = dims[index]
+    const column = columns[index]
+    if (!('field' in dim)) return sql`to_char(${column} at time zone ${zone}, ${dim.daily ? 'YYYY-MM-DD' : 'YYYY-MM'})`
+    const most = keep[index]
+    if (most === undefined) return column
+    const named = Array.isArray(most) ? most.filter(Boolean) : []
+    const kept = Array.isArray(most)
+      ? (named.length ? sql`${column}::text in (${sql.join(named.map(key => sql`${key}`), sql`, `)})` : sql.raw('false'))
+      : sql`${column} in (select ${column} from ${table} where ${within ?? sql.raw('true')}${drawn} and ${column} is not null group by ${column} having ${count} > 0 order by ${rank} desc nulls last, ${column}::text collate "C" limit ${most})`
+    // Postgres holds no NUL, so what is kept is marked as kept, and the rest is only a mark (see `keyIn`)
+    folds.add(index)
+    return sql`(case when ${column} is null then null when ${kept} then '+' || ${column}::text else '-' end)`
+  }
+  const folds = new Set<number>()
+  const keyIn = (row: Record<string, unknown>, index: number) => {
+    const key = row[`key${index}`]
+    if (key === null || key === undefined) return ''
+    if (!folds.has(index)) return String(key)
+    return String(key).startsWith('+') ? String(key).slice(1) : REST
+  }
+  const pickedOf = (within: Loose) => {
+    const picked: Record<string, unknown> = {}
+    dims.forEach((_, index) => {
+      picked[`key${index}`] = keyOf(index, within)
+    })
+    if (currency) picked.currency = currency
+    return Object.assign(picked, { count, sum: sql`sum(${value})`, min: sql`min(${value})`, max: sql`max(${value})` })
+  }
+  const headings = dims.length + (currency ? 1 : 0)
+  const ms = context.limits?.timeoutMs
 
   try {
     // Payload builds the query it would count with, and is handed this to run in place of the count
     const twin = Object.create(adapter, {
       countDistinct: {
         value: async ({ db, joins, where: built }: Loose) => {
-          let within = built
-          if (joins.length) {
-            // narrowed by what a record points at: each record once, however many of those it has
-            let ids = db.select({ id: table.id }).from(table).where(built).$dynamic()
-            for (const join of joins) ids = ids[join.type ?? 'leftJoin'](join.table, join.condition)
-            within = adapter.operators.in(table.id, ids)
+          const run = (on: Loose) => {
+            let within = built
+            if (joins.length) {
+              // narrowed by what a record points at: each record once, however many of those it has
+              let ids = on.select({ id: table.id }).from(table).where(built).$dynamic()
+              for (const join of joins) ids = ids[join.type ?? 'leftJoin'](join.table, join.condition)
+              within = adapter.operators.in(table.id, ids)
+            }
+            const query = on.select(pickedOf(within)).from(table).where(within)
+            return headings ? query.groupBy(...Array.from({ length: headings }, (_, index) => sql.raw(String(index + 1)))) : query
           }
-          const query = db.select(picked).from(table).where(within)
-          return headings ? query.groupBy(...Array.from({ length: headings }, (_, index) => sql.raw(String(index + 1)))) : query
+          if (!ms) return run(db)
+          // the database gives up on it too, in a transaction of its own (or a savepoint in the request's), so that
+          // the limit goes no further than this: undone where it fails, set back where it does not
+          return db.transaction(async (tx: Loose) => {
+            const rowsOf = (result: Loose) => result?.rows ?? result
+            const [{ was }] = rowsOf(await tx.execute(sql`select current_setting('statement_timeout') as was`))
+            await tx.execute(sql`select set_config('statement_timeout', ${String(Math.max(1, Math.ceil(ms)))}, true)`)
+            const rows = await run(tx)
+            await tx.execute(sql`select set_config('statement_timeout', ${String(was)}, true)`)
+            return rows
+          })
         },
       },
     })
     const { totalDocs: rows } = await adapter.count.call(twin, { collection: config.slug, locale: req.locale || undefined, req, where })
     return merged((rows as Record<string, unknown>[]).filter(row => Number(row.count)).map(row => ({
-      keys: dims.map((_, index) => (row[`key${index}`] === null || row[`key${index}`] === undefined ? '' : String(row[`key${index}`]))),
+      keys: dims.map((_, index) => keyIn(row, index)),
       currency: amount.format === 'money' ? String(row.currency || context.currency).toUpperCase() : '',
       count: Number(row.count), sum: Number(row.sum) || 0, min: Number(row.min) || 0, max: Number(row.max) || 0,
     })))
   } catch (error) {
+    // out of time is out of time: reading every record instead would take longer still
+    if (ms && ranOut(error)) throw new TimedOut(ms)
     // said once, and read the long way: a figure is worth more than the way it was come by
     if (!told.has(from.slug)) payload.logger.warn({ err: error, msg: `widgets: ${from.slug} could not be added up in the database, so its records are read instead` })
     told.add(from.slug)
     return undefined
   }
 }
+
+/** The hooks of a collection that make a find come to something else than the database holds. */
+const HOOKED = ['beforeOperation', 'beforeRead', 'afterRead', 'afterOperation'] as const
 
 const snake = (name: string) => name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[-\s]+/g, '_').toLowerCase()
 
@@ -396,17 +552,28 @@ const nameOfAmount = (amount: object) => {
   return all.of.get(amount) as number
 }
 
-/** What the records of a selection come to, told apart by any of `dims`. Kept as that (see `cache`), never as the records. */
-export const tallied = async <D>(context: Context, from: AnySource, selection: Selection, amount: Amount<D>, dims: Dim[] = []): Promise<Tally> => {
+/**
+ * What the records of a selection come to, told apart by any of `dims`. Kept as that (see `cache`), never as the
+ * records. Of a field, as many values are told apart as `keep` says for it, and at most `limits.groups` (1000 unless
+ * the widgets were told otherwise); the rest are one, under `REST`. A date tells every day or month apart.
+ */
+export const tallied = async <D>(context: Context, from: AnySource, selection: Selection, amount: Amount<D>, dims: Dim[] = [], keep: Keep[] = []): Promise<Tally> => {
+  const groups = groupsOf(context)
+  const kept: Keep[] = dims.map((dim, index) => {
+    if (!('field' in dim)) return undefined
+    const most = keep[index]
+    return Array.isArray(most) ? most : Math.min(groups, most ?? groups)
+  })
   const spec = [
     selection.where, amount.plain ?? `own:${nameOfAmount(amount)}`, amount.format, skips(amount as Amount<unknown>), dims,
-    context.zone ?? '', context.currency, !!from.draft, context.as.overrideAccess,
+    context.zone ?? '', context.currency, !!from.draft, context.as.overrideAccess, kept, recordsOf(context),
   ]
+  const currency = amount.format === 'money' ? context.currency.toUpperCase() : undefined
   return remembered(context, from, ['tally', ...spec], async (): Promise<Tally> => {
-    const cells = amount.plain ? await inDatabase(context, from, selection, amount, dims) : undefined
-    if (cells) return { cut: false, over: (...which) => merged(cells.map(cell => ({ ...cell, keys: which.map(index => cell.keys[index]) }))) }
+    const cells = amount.plain ? await inDatabase(context, from, selection, amount, dims, kept) : undefined
+    if (cells) return folded({ cut: false, over: (...which) => merged(cells.map(cell => ({ ...cell, keys: which.map(index => cell.keys[index]) }))) }, kept, amount.how, currency)
     const select = [...new Set([...amount.select, ...dims.map(dim => ('field' in dim ? dim.field : dim.date))])]
     const { docs, cut } = await upTo<D>(context, from, selection, select)
-    return fromRecords(context, docs, cut, amount, dims)
+    return folded(fromRecords(context, docs, cut, amount, dims), kept, amount.how, currency)
   })
 }

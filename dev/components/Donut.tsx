@@ -6,7 +6,8 @@ import type { ChartViewProps } from 'payload-plugin-widgets/rsc'
 // A view of the demo's own, and one for the browser: it is handed what the chart tile would be made of, as plain
 // data, and keeps which part the pointer is on. A chart library is given `bars` and `series` the same way.
 
-const COLOURS = ['var(--theme-success-500)', 'var(--color-blue-500)', 'var(--theme-warning-500)', 'var(--theme-error-500)', 'var(--theme-elevation-500)']
+// Payload 3's colours, then Payload 4's, which renamed them
+const COLOURS = ['var(--theme-success-500, var(--color-icon-success))', 'var(--color-blue-500, var(--ramp-blue-500))', 'var(--theme-warning-500, var(--color-icon-warning))', 'var(--theme-error-500, var(--color-icon-danger))', 'var(--theme-elevation-500, var(--color-text-tertiary))']
 const ROUND = 2 * Math.PI * 40
 
 export const Donut = ({ label, note, bars, empty, name }: Omit<ChartViewProps, 'req'>) => {

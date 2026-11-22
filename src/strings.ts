@@ -11,9 +11,10 @@
 
 export const STRINGS = [
   // what a widget is, before it is set up
-  'Widget', 'A figure', 'A list', 'A chart',
+  'Widget', 'Figure', 'List', 'Chart',
   'Choose what it shows: the pencil on the widget while editing the dashboard',
-  // its settings
+  // its settings, in three parts
+  'What is counted', 'When', 'How it looks',
   'Title', 'Leave empty to have it named after what it shows.',
   'Of what', 'Which ones', 'Leave empty for all of them.', 'Only those where',
   'What about them', 'Leave empty for how many there are.',
@@ -30,13 +31,14 @@ export const STRINGS = [
   // what a collection has without declaring it
   'How many', 'Average {what}', 'Lowest {what}', 'Highest {what}', 'Created', 'Updated', 'The latest', 'Nothing here yet',
   // on a tile
-  '+ New', 'That could not be added.', 'Nothing recorded yet', 'Nothing to show yet',
+  '+ New', 'Add', 'Added', 'That could not be added.', 'Nothing recorded yet', 'Nothing to show yet',
   '{count} in all', '{count} in another currency left out', 'Only the first {count} are counted',
   '{change} on the period before', 'Nothing in the period before', '{percent} of {goal}', 'by {what}', 'Yes', 'No', 'None', 'Other',
+  'Each series is drawn to its own scale',
   // a tile's tone, said to whoever does not see its colour
   'Needs attention', 'Urgent',
   // what cannot be shown
-  'Not available to this account', 'This could not be read',
+  'Not available to this account', 'This could not be read', 'This widget could not be read',
   // what is set up wrong
   'There is no source called "{name}"',
   '{source} has no filter called "{name}"',
@@ -62,6 +64,15 @@ export const STRINGS = [
   'Progress is towards a goal: give it one',
   'There is nothing before this to compare it with: give it a period that has a beginning',
   '"{name}" of {source} gives no number to compare or to set against a goal',
+  '"{name}" of {source} is not a number',
+  '{field} is a date: "{name}" is neither a date (YYYY-MM-DD) nor a moment such as "today" or "startOfMonth-1m"',
+  'In the formula, at "{at}": {way} takes two parts, not {count}',
+  'In the formula, at "{at}": {way} takes at least one part',
+  'In the formula, at "{at}": when takes what a record has to have, and a then',
+  'In the formula, at "{at}": a part is a number, a number field, or one of add, subtract, multiply, divide, first and when',
+  'There are two widgets called "{name}"',
+  'This took longer to read than the {seconds} s it is given',
+  'A widget cannot be called "{name}": {owner} has one called that',
   'Did you mean "{name}"?',
 ] as const
 

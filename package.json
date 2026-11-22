@@ -1,6 +1,6 @@
 {
   "name": "payload-plugin-widgets",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Payload CMS plugin for dashboard widgets: KPI figures, lists and charts that read from your collections, set up in the config or by whoever is looking.",
   "license": "MIT",
   "author": {
@@ -59,7 +59,9 @@
   ],
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "UPGRADING.md",
+    "docs/*.md"
   ],
   "exports": {
     ".": {
@@ -73,6 +75,10 @@
     "./client": {
       "types": "./src/exports/client.ts",
       "default": "./src/exports/client.ts"
+    },
+    "./advanced": {
+      "types": "./src/exports/advanced.ts",
+      "default": "./src/exports/advanced.ts"
     },
     "./widgets.css": "./src/widgets.css",
     "./package.json": "./package.json"
@@ -93,6 +99,10 @@
         "types": "./dist/exports/client.d.ts",
         "default": "./dist/exports/client.js"
       },
+      "./advanced": {
+        "types": "./dist/exports/advanced.d.ts",
+        "default": "./dist/exports/advanced.js"
+      },
       "./widgets.css": "./dist/widgets.css",
       "./package.json": "./package.json"
     },
@@ -109,9 +119,9 @@
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "peerDependencies": {
-    "@payloadcms/ui": "^3.90.0",
+    "@payloadcms/ui": "^3.90.0 || ^4.0.0-0",
     "next": "^15.2.9 || ^16.0.0",
-    "payload": "^3.90.0",
+    "payload": "^3.90.0 || ^4.0.0-0",
     "react": "^19.0.0"
   },
   "devDependencies": {
@@ -122,7 +132,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "graphql": "^16.8.1",
-    "next": "^16.3.8",
+    "next": "^16.4.6",
     "payload": "^3.90.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
