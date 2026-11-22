@@ -3,6 +3,73 @@
 What changed in each version that was published. The versions follow [semantic versioning](https://semver.org);
 until 1.0.0 a minor version may change what a config is written like, and says so here.
 
+## 0.6.0
+
+Filters typed against the collections, a config that stops where it names what is not there, limits on what a
+widget may ask of the database, and a say in who sets widgets up. Some configs need a change: see
+[UPGRADING.md](https://github.com/m-grgic/payload-plugin-widgets/blob/main/UPGRADING.md#05--06).
+
+- **Changed:** with `payload-types.ts` generated, a `where` is checked against its collection: in a widget, in a
+  source's filter and in a formula's `when`. A field it does not have, a choice its select does not offer, an
+  operator Payload has none of, or a number compared with text, no longer compiles. `raw(…)` says a filter the
+  types cannot follow, such as a path through a relationship, as it is; it is still checked as the config is
+  built.
+- **Changed:** a field that is not there, in a `where`, a `date`, a measure or a formula, stops the config from
+  being built, or Payload as it starts where the collection is only settled then. Before, it was logged. A
+  declared source is checked whole: its dates, groups, scopes, measures and currency fields as well as its
+  filters. `strict: false` has it logged as before.
+- **Changed:** a figure read with `overrideAccess` hands `context.data` only the settings named in its new
+  `trusted`; the rest are what its `data` starts them as. Before, whoever had it on their dashboard could set any
+  of them to anything, and have it read with the server's access past what they may read.
+- **Changed:** the drawer's widgets are "Figure", "List" and "Chart" (they were "A figure", "A list", "A chart"),
+  and their settings are under three headings: What is counted, When, How it looks. A translation of the old
+  names has to be given again; one that is nearly a string the widgets say is warned of as Payload starts.
+- **Changed:** two widgets with one slug, or one with the slug of a widget of the dashboard's, of the drawer's
+  (`figure`, `records`, `chart`) or of Payload's (`collections`), stop the config from being built.
+- **Changed:** `Misconfigured` is no longer an `Unavailable`. Each problem has a `code` and a `path` in the
+  options, and what the plugin throws as the config is built is a `Misconfigured` that says them.
+- **Changed:** in production, a widget that cannot be read says "This widget could not be read", and the log says
+  why. One somebody set up in the drawer still tells them what is wrong, in the admin's names. One that took
+  longer than `limits.timeoutMs` says so to anybody.
+- **Changed:** the root entry exports what is settled. `any` is `anyOf`; the type `ReadyWidget` is
+  `WidgetDefinition`; `Selection`, `worded`, `labelled`, `nameOf`, `amountOf`, `shown`, `added`, `CALCS`,
+  `combined`, `counted`, `fetched`, `currencyOf` and `MANY` are in the new `payload-plugin-widgets/advanced`,
+  which may change in a minor version. `CALLED` and `calcOf` are gone.
+- **Changed:** a measure said in place is typed as a number field of the collection, a figure drawn as progress
+  needs a `goal` to compile, and `sources: { slug: false }` is only taken for a collection there is.
+- **Changed:** a chart has eight series colours of its own, one set for the light theme and one for the dark,
+  told apart with the common kinds of colour blindness. `--widgets-series-1` to `-8` set them.
+- **Changed:** on Postgres a collection with a `beforeOperation`, `beforeRead`, `afterRead` or `afterOperation`
+  hook is read record by record, as one with `afterRead` was, since its records may read otherwise than they are
+  kept.
+- **Changed:** `ListViewProps.words` has `submit` and `added` as well; the quick-add box has a button and says
+  what it added.
+- **Added:** `limits` in the options: `records` (5,000), how many are read where they are read one by one;
+  `groups` (1,000), how many values of a field a tally keeps apart; `timeoutMs`, how long a widget may take,
+  after which its tile says so and, on Postgres, the database gives up as well. A read given up on throws a
+  `TimedOut`, exported from the root.
+- **Added:** `userWidgets` in the options: which kinds the drawer offers, of which sources, and an `access` for who
+  may have them, asked on every request. `false` offers none.
+- **Added:** a chart's columns and points say what they come to on the pointer and on focus, a scale says what
+  the top comes to, and a chart has a table of its figures for a screen reader. Series that are not read alike
+  are each drawn to their own scale, and the legend says so.
+- **Added:** a label of a ready-made widget and of an `action` may be given in several languages, as a source's
+  can: `{ en: 'Orders', de: 'Bestellungen' }`.
+- **Added:** `list` may be left out of a declared source: the first list it declares is drawn.
+- **Added:** the types `FigureOptions`, `ListOptions`, `ChartOptions`, `Sources`, `ProblemCode`, `Series`,
+  `WhereOf`, `FieldWhere`, `RawWhere`, `FigureReading` and `ReadFigureOptions`, `ReadListOptions` and
+  `ReadChartOptions`.
+- **Fixed:** a read made twice in one request, and a collection's access asked twice, is made once, also without
+  `cache`; the previous period and the line under a figure are read at the same time.
+- **Fixed:** what is wrong with a filter no longer names a field the person looking may not read, and the titles
+  of what a chart's bars point at are read as that person, also under `overrideAccess`.
+- **Fixed:** on Postgres a chart split by a field of many values has the database keep only the ones it draws.
+- The package: the documentation is split into pages under `docs/`, and `UPGRADING.md` says what to change from
+  one minor version to the next.
+- **Added:** the Payload 4 beta is accepted beside Payload 3.90 and later. The same code is type-checked and tested
+  on 4.0.0-beta.11, and the stylesheet falls back to its colours where the ones of Payload 3 are gone.
+- The package: the demo and the tests are on Next.js 16.4.6, past the advisories against 16.4.0.
+
 ## 0.5.1
 
 Figures that were wrong in some cases, charts a keyboard and a screen reader can use, and a package that is
