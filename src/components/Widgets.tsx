@@ -40,7 +40,7 @@ const wordsOf = (req: WidgetServerProps['req']) => settingsOf(req.payload).words
 
 const unset = (req: WidgetServerProps['req'], label: string) => {
   const { t } = wordsOf(req)
-  return <Notice label={t(label)} note={t('Choose what it shows: the pencil on the widget while editing the dashboard')} />
+  return <Notice label={t(label)} note={t('Choose what it shows: the pencil on the widget while editing the dashboard')} kind="unset" />
 }
 
 export const FigureWidget = async ({ req, widgetData: data }: WidgetServerProps) => {
@@ -72,7 +72,7 @@ export const ReadyWidget = async ({ req, widgetData, widgetSlug }: WidgetServerP
   const widget = settings.widgets.find(candidate => candidate.slug === widgetSlug)
   if (!widget) return null
   const { t } = settings.words(req)
-  if (!await mayUse(settings, req, widget)) return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} />
+  if (!await mayUse(settings, req, widget)) return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} kind="denied" />
   // one of the project's own is drawn by its own component, not by this one
   if (widget.kind === 'own') return null
   const { source, label, show, action, access, overrideAccess } = widget

@@ -1,4 +1,4 @@
-import type { Field, Option, PayloadRequest, Widget } from 'payload'
+import { validations, type Field, type NumberFieldSingleValidation, type Option, type PayloadRequest, type Widget } from 'payload'
 import type { Settings } from './options'
 import { PERIODS, VIEWS, worded, type AnySource, type Kind, type Label, type Measure } from './types'
 
@@ -104,6 +104,14 @@ export const setUp = (settings: Settings): Widget[] => {
     admin: { condition: reckons },
   }
 
+  // progress is drawn towards a goal: without one it is refused when it is saved, not when it is drawn
+  const needsGoal: NumberFieldSingleValidation = (value, options) => {
+    if ((options.siblingData as { as?: unknown } | undefined)?.as === 'progress' && !(Number(value) > 0)) {
+      return settings.words(options.req).t('Progress is towards a goal: give it one')
+    }
+    return validations.number(value, options as Parameters<typeof validations.number>[1])
+  }
+
   // offered only where there is a choice: the plugin's own ways for the kind, and the project's
   const drawn = (kind: Kind): Field[] => {
     const options = [
@@ -129,7 +137,8 @@ export const setUp = (settings: Settings): Widget[] => {
           name: 'compare', type: 'select', label: 'Compared with', options: [{ label: 'The period before', value: 'previous' }],
           admin: { condition: (data, sibling) => !!sibling?.period && !['all', 'past', 'upcoming'].includes(String(sibling.period)), description: 'Leave empty for no comparison.' },
         },
-        { name: 'goal', type: 'number', label: 'Goal', min: 0, admin: { description: 'What it is set against. Leave empty for none.' } },
+        // it is needed where it is drawn as progress, and said in the line under it however it is drawn, so it is always offered
+        { name: 'goal', type: 'number', label: 'Goal', min: 0, validate: needsGoal, admin: { description: 'What it is set against. Leave empty for none.' } },
         ...drawn('figure'),
         {
           name: 'note', type: 'text', label: 'Line under it',

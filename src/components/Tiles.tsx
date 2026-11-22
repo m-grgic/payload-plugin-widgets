@@ -23,6 +23,11 @@ const marks = (kind: string, tone: Tone, name?: string, view?: string) => ({ 'da
 const Extra = ({ action }: Pick<Slots, 'action'>) =>
   action ? <Link className="widgets-tile__action" href={action.href} {...(/^https?:/.test(action.href) ? { target: '_blank', rel: 'noreferrer' } : {})}>{action.label}</Link> : null
 
+/** What the tone of a tile, otherwise only a colour, says to whoever does not see it. */
+type Toned = { warn?: string; bad?: string }
+const Spoken = ({ tone, words }: { tone: Tone; words?: Toned }) =>
+  tone === 'calm' ? null : <span className="widgets-hidden">{', '}{tone === 'warn' ? words?.warn ?? 'Needs attention' : words?.bad ?? 'Urgent'}</span>
+
 export interface TileContent {
   label: string
   value: ReactNode
@@ -62,16 +67,18 @@ export interface ChartContent {
  * One figure: what it is, the number, and a line under it. Orange or red when it wants attention. Asked for as
  * progress, how far towards its goal it is stands between the two; as a sparkline, what it was over time.
  */
-export const Tile = ({ label, value, note, tone = 'calm', href, action, after, name, trend, goal, series, as = 'number' }: TileContent & Slots & { as?: 'number' | 'progress' | 'sparkline' }) => {
+export const Tile = ({ label, value, note, tone = 'calm', href, action, after, name, trend, goal, series, as = 'number', words }: TileContent & Slots & { as?: 'number' | 'progress' | 'sparkline'; /** What its tone is said as, in the language of whoever looks. */ words?: Toned }) => {
   const marked = { ...marks('figure', tone, name, as), ...(trend ? { 'data-trend': trend } : {}) }
   const peak = Math.max(...(series ?? []).map(point => Math.abs(point.amount)), 0)
+  // which way it went, for whoever does not tell it by the number: the note says how much
+  const way = trend === 'up' ? '▲' : trend === 'down' ? '▼' : null
   const inside = (
     <>
-      <span className="widgets-tile__label">{label}</span>
+      <span className="widgets-tile__label">{label}<Spoken tone={tone} words={words} /></span>
       <span className="widgets-tile__value">{value}</span>
       {as === 'progress' && goal ? <span className="widgets-tile__progress" role="img" aria-label={`${Math.round(goal.share * 100)}%`}><span style={{ width: `${Math.min(1, goal.share) * 100}%` }} /></span> : null}
       {as === 'sparkline' && series?.length && peak ? <Line bars={series} peak={peak} label={label} spark /> : null}
-      {note ? <span className="widgets-tile__note">{note}</span> : null}
+      {note ? <span className="widgets-tile__note">{way ? <span className="widgets-tile__trend" aria-hidden="true">{way}</span> : null}{note}</span> : null}
     </>
   )
   // a link cannot hold another: with something of the project's own in it, only the figure leads to the list
@@ -89,10 +96,26 @@ export const Tile = ({ label, value, note, tone = 'calm', href, action, after, n
     : <div className="widgets-tile widgets-tile--plain" {...marked}>{inside}</div>
 }
 
-/** A tile that only says something, for a figure that cannot be shown. */
-export const Notice = ({ label, note, name }: { label: string; note: string; name?: string }) => (
-  <div className="widgets-tile widgets-tile--plain" {...marks('notice', 'calm', name)}>
-    <span className="widgets-tile__label">{label}</span>
+/** The sign a notice is told apart by, beside the words that say why. */
+const SIGNS = {
+  // something went wrong: an exclamation mark in a ring
+  error: <><circle cx="8" cy="8" r="6.25" /><path d="M8 4.75v3.75M8 11v.25" /></>,
+  // not for this account: a lock
+  denied: <><rect x="3.5" y="7.25" width="9" height="6.25" rx="1.5" /><path d="M5.5 7.25V5.5a2.5 2.5 0 0 1 5 0v1.75" /></>,
+  // nothing chosen yet: the pencil it is set up with
+  unset: <path d="M10.75 2.75l2.5 2.5L6 12.5H3.5V10z" />,
+}
+
+/**
+ * A tile that only says something, for a figure that cannot be shown. `kind` says why, as `data-notice`, and draws a
+ * sign for it: it went wrong (`error`), it is not for whoever looks (`denied`), or it is not set up yet (`unset`).
+ */
+export const Notice = ({ label, note, name, kind }: { label: string; note: string; name?: string; kind?: 'error' | 'denied' | 'unset' }) => (
+  <div className="widgets-tile widgets-tile--plain" {...marks('notice', 'calm', name)} {...(kind ? { 'data-notice': kind } : {})}>
+    <span className="widgets-tile__label">
+      {kind ? <svg className="widgets-tile__sign" viewBox="0 0 16 16" aria-hidden="true" focusable="false">{SIGNS[kind]}</svg> : null}
+      {label}
+    </span>
     <span className="widgets-tile__note">{note}</span>
   </div>
 )
@@ -101,11 +124,11 @@ export const Notice = ({ label, note, name }: { label: string; note: string; nam
  * The first few of a list with a link to all of them, and where it makes sense a way to add one. `api` is Payload's
  * API route; `words` are what the link to a new one and a failed quick add say, in the language of whoever looks.
  */
-export const ListTile = ({ label, note, tone, href, rows, empty, add, quick, api, words, action, after, name }: ListContent & Slots & { api: string; words?: { add?: string; failed?: string } }) => (
+export const ListTile = ({ label, note, tone, href, rows, empty, add, quick, api, words, action, after, name }: ListContent & Slots & { api: string; words?: { add?: string; failed?: string } & Toned }) => (
   <section className="widgets-tile widgets-tile--plain" {...marks('list', tone, name)}>
     <div className="widgets-tile__head">
       <Link href={href}>
-        <span className="widgets-tile__label">{label}</span>
+        <span className="widgets-tile__label">{label}<Spoken tone={tone} words={words} /></span>
         <span className="widgets-tile__note">{note}</span>
       </Link>
       <Extra action={action} />
@@ -178,17 +201,19 @@ const Columns = ({ bars, peak, many, stacked }: { bars: Bars; peak: number; many
   return (
   <ol className="widgets-columns" {...arranged(many, stacked)}>
     {bars.map((bar, index) => {
+      const said = many ? told(bar.label, many, index) : `${bar.label}: ${bar.shown || '0'}`
+      // what it is and how much is said in it, so the link is named by it: what shows under it is not always there
       const inside = (
         <>
           <span className="widgets-columns__bar" aria-hidden="true">
             {many && tall ? many.map((one, at) => <span key={one.key} {...hue(at)} style={{ height: tall(one, index) }} />) : <span style={{ height: `${share(bar.amount, peak) * 100}%` }} />}
           </span>
           {/* it has the room of the columns up to the next one that is named */}
-          <span className="widgets-columns__label" style={{ maxWidth: `${Math.min(step, bars.length - index) * 100}%` }}>{index % step ? '' : bar.label}</span>
+          <span className="widgets-columns__label" aria-hidden="true" style={{ maxWidth: `${Math.min(step, bars.length - index) * 100}%` }}>{index % step ? '' : bar.label}</span>
+          <span className="widgets-hidden">{said}</span>
         </>
       )
-      const said = many ? told(bar.label, many, index) : `${bar.label}: ${bar.shown || '0'}`
-      return <li key={index} title={said} aria-label={said}>{bar.href ? <Link href={bar.href}>{inside}</Link> : <div>{inside}</div>}</li>
+      return <li key={index} title={said}>{bar.href ? <Link href={bar.href}>{inside}</Link> : <div>{inside}</div>}</li>
     })}
   </ol>
   )
@@ -201,16 +226,31 @@ const Line = ({ bars, peak, label, spark, many }: { bars: Bars; peak: number; la
   const through = (of: { amount: number }[], against: number) => of.map((bar, index) => `${of.length > 1 ? (index / (of.length - 1)) * 100 : 50},${(HEIGHT - 1 - share(bar.amount, against) * (HEIGHT - 2)).toFixed(2)}`).join(' ')
   const named = [...new Set([0, Math.floor((bars.length - 1) / 2), bars.length - 1])]
   const said = many ? many.map(one => `${one.label} ${one.total}`) : bars.map(bar => `${bar.label} ${bar.shown || '0'}`)
+  // each point that leads somewhere is a link as wide as the room up to half way to the ones beside it, unseen until
+  // it is focused; under a figure the tile itself is the link
+  const last = Math.max(1, bars.length - 1)
+  const room = (index: number) => {
+    if (bars.length === 1) return { left: '0%', width: '100%' }
+    const start = Math.max(0, (index - 0.5) / last), end = Math.min(1, (index + 0.5) / last)
+    return { left: `${start * 100}%`, width: `${(end - start) * 100}%` }
+  }
+  const points = spark ? [] : bars.flatMap((bar, index) => (bar.href ? [{ bar, index }] : []))
   return (
     <span className={spark ? 'widgets-line widgets-line--spark' : 'widgets-line'}>
-      <svg viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${label}: ${said.join(', ')}`}>
-        {many ? many.map((one, at) => <polyline key={one.key} className="widgets-line__stroke" {...hue(at)} points={through(one.bars, one.peak)} />) : (
-          <>
-            <polygon className="widgets-line__area" points={`0,${HEIGHT} ${through(bars, peak)} 100,${HEIGHT}`} />
-            <polyline className="widgets-line__stroke" points={through(bars, peak)} />
-          </>
-        )}
-      </svg>
+      <span className="widgets-line__plot">
+        <svg viewBox={`0 0 100 ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${label}: ${said.join(', ')}`}>
+          {many ? many.map((one, at) => <polyline key={one.key} className="widgets-line__stroke" {...hue(at)} points={through(one.bars, one.peak)} />) : (
+            <>
+              <polygon className="widgets-line__area" points={`0,${HEIGHT} ${through(bars, peak)} 100,${HEIGHT}`} />
+              <polyline className="widgets-line__stroke" points={through(bars, peak)} />
+            </>
+          )}
+        </svg>
+        {points.map(({ bar, index }) => {
+          const one = many ? told(bar.label, many, index) : `${bar.label}: ${bar.shown || '0'}`
+          return <Link key={index} href={bar.href as string} className="widgets-line__point" style={room(index)} title={one}><span className="widgets-hidden">{one}</span></Link>
+        })}
+      </span>
       {spark ? null : <span className="widgets-line__labels">{named.map(index => <span key={index}>{bars[index].label}</span>)}</span>}
     </span>
   )

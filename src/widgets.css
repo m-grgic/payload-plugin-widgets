@@ -24,13 +24,13 @@
  *      --widgets-chart-height  how tall columns and a line are drawn, and --widgets-spark-height the line under a figure
  *      --widgets-series-1 … -6 the colours of a chart's series, the first being --widgets-accent where it is not given
  *
- * 2. The classes: `.widgets-tile` with `__label`, `__value`, `__progress`, `__note`, `__head`, `__rows`, `__late`, `__action`,
- *    `__add`; `.widgets-chart` with `__label`, `__bar`, `__value`; `.widgets-columns` with `__bar`, `__label`;
- *    `.widgets-line` with `__stroke`, `__area`, `__labels`; `.widgets-legend` with `__mark`, `__total`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
+ * 2. The classes: `.widgets-tile` with `__label`, `__value`, `__progress`, `__note`, `__trend`, `__sign`, `__head`, `__rows`,
+ *    `__late`, `__action`, `__add`; `.widgets-chart` with `__label`, `__bar`, `__value`; `.widgets-columns` with `__bar`,
+ *    `__label`; `.widgets-line` with `__plot`, `__stroke`, `__area`, `__point`, `__labels`; `.widgets-legend` with `__mark`, `__total`; `.widgets-quick` and `.widgets-note`. They keep their names. Everything here is in a layer, so a rule of the project's own wins whatever its selector.
  *
  * 3. What each tile says of itself: `data-kind` (figure, list, chart, notice, note), `data-tone` (calm, warn, bad),
  *    `data-view` (number, progress, sparkline; bars, columns, line), on a figure that is compared `data-trend` (up,
- *    down, flat) and, on a ready-made widget, `data-widget` with its slug.
+ *    down, flat), on a notice `data-notice` (error, denied, unset) and, on a ready-made widget, `data-widget` with its slug.
  *
  *      .widgets-tile[data-widget='unpaid-invoices'] { --widgets-value-size: 40px; }
  *      .widgets-tile[data-tone='bad'] { --widgets-border: var(--theme-error-500); }
@@ -73,6 +73,31 @@
   .widgets-tile[data-kind=notice] {
     gap: 6px;
   }
+  /* of the plugin's own: quieter than a figure, a dashed edge and a sign of why in place of the dot */
+  .widgets-tile[data-notice] {
+    border-style: dashed;
+  }
+  .widgets-tile[data-notice] .widgets-tile__label:before {
+    content: none;
+  }
+  .widgets-tile__sign {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    color: var(--theme-elevation-500);
+  }
+  /* what went wrong is told by the colour of what is wrong as well */
+  .widgets-tile[data-notice=error] {
+    border-color: var(--theme-error-300);
+  }
+  .widgets-tile[data-notice=error] .widgets-tile__sign {
+    color: var(--widgets-bad, var(--theme-error-500));
+  }
   .widgets-tile__label {
     display: flex;
     align-items: center;
@@ -107,7 +132,8 @@
   .widgets-tile__progress {
     display: block;
     height: 6px;
-    margin: 4px 0 2px;
+    margin-block: 4px 2px;
+    margin-inline: 0;
     border-radius: 3px;
     background: var(--theme-elevation-100);
   }
@@ -120,6 +146,25 @@
   .widgets-tile__note {
     font-size: var(--widgets-note-size, 13px);
     color: var(--widgets-muted, var(--theme-elevation-650));
+  }
+  /* which way a figure that is compared went, before what the note says of it */
+  .widgets-tile[data-trend] .widgets-tile__trend {
+    margin-inline-end: 4px;
+    font-size: 0.75em;
+  }
+  /* said to whoever does not see the page, and not shown */
+  .widgets-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    border: 0;
+    text-transform: none;
+    white-space: nowrap;
   }
   /* a figure with something of the project's own under it: only the figure is the link */
   .widgets-tile__figure {
@@ -168,7 +213,7 @@
     padding: 0;
   }
   .widgets-tile__rows li + li {
-    border-top: 1px solid var(--widgets-border, var(--theme-border-color));
+    border-block-start: 1px solid var(--widgets-border, var(--theme-border-color));
   }
   .widgets-tile__rows a {
     display: flex;
@@ -287,12 +332,13 @@
     flex: 1;
     align-items: flex-end;
     align-self: stretch;
-    border-bottom: 1px solid var(--theme-elevation-100);
+    border-block-end: 1px solid var(--theme-elevation-100);
   }
   .widgets-columns__bar span {
     display: block;
     width: 100%;
-    border-radius: 3px 3px 0 0;
+    border-start-start-radius: 3px;
+    border-start-end-radius: 3px;
     background: var(--widgets-accent, var(--theme-success-500));
   }
   /* one of many is wider than its column: it runs on under the ones after it that are not named */
@@ -309,6 +355,11 @@
   /* a line: stretched to the tile, as thick wherever it is */
   .widgets-line {
     display: block;
+  }
+  /* what is drawn, and the points over it that lead to what they are of */
+  .widgets-line__plot {
+    display: block;
+    position: relative;
   }
   .widgets-line svg {
     display: block;
@@ -332,16 +383,26 @@
     fill: var(--widgets-accent, var(--theme-success-500));
     opacity: 0.12;
   }
+  /* seen only when it is focused: the line looks the same with or without them */
+  .widgets-line__point {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+  }
+  .widgets-line__point:focus-visible {
+    outline: var(--accessibility-outline);
+    outline-offset: 2px;
+  }
   .widgets-line__labels {
     display: flex;
     justify-content: space-between;
-    margin-top: 6px;
+    margin-block-start: 6px;
     color: var(--widgets-muted, var(--theme-elevation-650));
     font-size: 11px;
   }
   .widgets-chart__value {
     min-width: 3ch;
-    text-align: right;
+    text-align: end;
     color: var(--widgets-muted, var(--theme-elevation-650));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -351,7 +412,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 4px;
+    margin-block-start: 4px;
   }
   .widgets-quick__item {
     padding: 8px 14px;
@@ -368,7 +429,8 @@
     background: var(--theme-elevation-100);
   }
   .widgets-note p {
-    margin: 0 0 8px;
+    margin: 0;
+    margin-block-end: 8px;
     font-size: var(--widgets-text-size, 14px);
     line-height: 1.5;
     white-space: pre-line;
@@ -407,7 +469,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px 14px;
-    margin: 0 0 8px;
+    margin: 0;
+    margin-block-end: 8px;
     padding: 0;
     list-style: none;
     color: var(--widgets-muted, var(--theme-elevation-650));

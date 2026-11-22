@@ -33,6 +33,8 @@ export const STRINGS = [
   '+ New', 'That could not be added.', 'Nothing recorded yet', 'Nothing to show yet',
   '{count} in all', '{count} in another currency left out', 'Only the first {count} are counted',
   '{change} on the period before', 'Nothing in the period before', '{percent} of {goal}', 'by {what}', 'Yes', 'No', 'None', 'Other',
+  // a tile's tone, said to whoever does not see its colour
+  'Needs attention', 'Urgent',
   // what cannot be shown
   'Not available to this account', 'This could not be read',
   // what is set up wrong

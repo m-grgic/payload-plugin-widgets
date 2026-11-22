@@ -41,15 +41,15 @@ type Shown = Slots & {
 
 
 /** Why something could not be shown: what is set up wrong is said as it is, so it can be put right; what is refused is not. */
-const reason = ({ t, payload }: Context, label: string, error: unknown) => {
+const reason = ({ t, payload }: Context, label: string, error: unknown): { note: string; kind: 'error' | 'denied' } => {
   const problems = problemsOf(error)
-  if (problems) return problems.map(problem => inWords(problem, t)).join(' ')
-  if (error instanceof Error && error.name === 'Unavailable') return t('Not available to this account')
+  if (problems) return { note: problems.map(problem => inWords(problem, t)).join(' '), kind: 'error' }
+  if (error instanceof Error && error.name === 'Unavailable') return { note: t('Not available to this account'), kind: 'denied' }
   const { status, message } = error as { status?: number; message?: string }
-  if (status === 401 || status === 403) return t('Not available to this account')
+  if (status === 401 || status === 403) return { note: t('Not available to this account'), kind: 'denied' }
   payload.logger.error({ err: error, msg: `widgets: "${label}" could not be read` })
   // a query Payload cannot run says which part of it; anything else is for the log, and for whoever is developing
-  return status === 400 && message ? message : `${t('This could not be read')}${process.env.NODE_ENV !== 'production' && message ? `: ${message}` : ''}`
+  return { note: status === 400 && message ? message : `${t('This could not be read')}${process.env.NODE_ENV !== 'production' && message ? `: ${message}` : ''}`, kind: 'error' }
 }
 
 /** Something that could not be shown says why in a tile of its own, or leaves no trace where it is `quiet`, and nothing else breaks. */
@@ -59,7 +59,7 @@ const guarded = async (context: Context, label: string, quiet: boolean | undefin
   } catch (error) {
     // on a page it is one part of many: whoever it is not for does not miss it
     if (quiet) return null
-    return <Notice label={label} name={name} note={reason(context, label, error)} />
+    return <Notice label={label} name={name} {...reason(context, label, error)} />
   }
 }
 
@@ -82,6 +82,9 @@ const own = (req: PayloadRequest, kind: Kind, as: string | undefined, props: obj
   return RenderServerComponent({ Component: views[as].Component, importMap: req.payload.importMap, clientProps: { ...props, view: as }, serverProps: { req } })
 }
 
+/** What a tile's tone is said as to whoever does not see its colour. */
+const toned = ({ t }: Context) => ({ warn: t('Needs attention'), bad: t('Urgent') })
+
 /** The link a project adds is written in English like the rest. */
 const said = ({ t }: Context, action: Slots['action']) => (action ? { ...action, label: t(action.label) } : undefined)
 
@@ -99,7 +102,7 @@ export const gated = (Component: (props: WidgetServerProps) => Promise<React.Rea
     const widget = settings.widgets.find(candidate => candidate.slug === widgetSlug)
     if (widget && !await mayUse(settings, req, widget)) {
       const { t } = settings.words(req)
-      return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} />
+      return <Notice label={t(widget.label)} name={widget.slug} note={t('Not available to this account')} kind="denied" />
     }
     return Component(props)
   }
@@ -125,7 +128,7 @@ export const Figure = async <S extends CollectionSlug, F extends string, M exten
   const name = label ? context.t(label) : titleOf(context, pick, 'figure')
   return guarded(context, name, quiet, called, async () => {
     const tile = { ...await readFigure(context, pick), label: name, name: called, action: said(context, action), after }
-    return own(req, 'figure', as, tile) ?? <Tile {...tile} as={as as keyof typeof VIEWS.figure | undefined} />
+    return own(req, 'figure', as, tile) ?? <Tile {...tile} as={as as keyof typeof VIEWS.figure | undefined} words={toned(context)} />
   })
 }
 
@@ -139,7 +142,7 @@ export const Records = async <S extends CollectionSlug, F extends string, L exte
   const words = { add: context.t('+ New'), failed: context.t('That could not be added.') }
   return guarded(context, name, quiet, called, async () => {
     const tile = { ...await readList(context, pick), label: name, name: called, api: req.payload.config.routes.api, words, action: said(context, action), after }
-    return own(req, 'list', as, tile) ?? <ListTile {...tile} />
+    return own(req, 'list', as, tile) ?? <ListTile {...tile} words={{ ...words, ...toned(context) }} />
   })
 }
 
